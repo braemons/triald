@@ -10,9 +10,31 @@ did and how many of them counted.
 from __future__ import annotations
 
 import dataclasses
+import enum
 from collections import Counter
 
 from triald.outcomes import OutcomeReport, TrialOutcome
+
+
+class TrialCountCriterion(enum.StrEnum):
+    """A way of counting trials, shared by the switch rule and the stop rule.
+
+    One enum rather than two because the question is the same one - *how many
+    trials of what kind* - and VStim asks it in both places with the same three
+    answers (``TrialCountCriterion``). Two enums would drift.
+    """
+
+    ACCEPTED_TRIALS = "accepted_trials"
+    """Trials the accept flags let through - the ones that fill a round."""
+
+    HITS = "hits"
+    """Trials that ended in :attr:`~triald.outcomes.TrialOutcome.HIT`.
+
+    Early hits do not count - see :data:`~triald.outcomes.HIT_OUTCOMES`.
+    """
+
+    ALL_TRIALS = "all_trials"
+    """Every completed trial, whatever it ended in."""
 
 
 @dataclasses.dataclass(slots=True)
@@ -55,6 +77,14 @@ class ResultCount:
     @property
     def hits(self) -> int:
         return self.by_outcome[TrialOutcome.HIT]
+
+    def counted(self, criterion: TrialCountCriterion) -> int:
+        """The tally `criterion` names. VStim's ``TrialsCountedInSession``."""
+        if criterion is TrialCountCriterion.HITS:
+            return self.hits
+        if criterion is TrialCountCriterion.ALL_TRIALS:
+            return self.total
+        return self.accepted
 
     @property
     def hit_rate(self) -> float | None:

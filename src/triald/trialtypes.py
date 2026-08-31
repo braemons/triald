@@ -17,8 +17,9 @@ Ported from ``VStim::TrialType::TrialTypeConfig`` / ``TrialTypeSet`` /
 from __future__ import annotations
 
 import dataclasses
-import enum
 from collections.abc import Iterator
+
+from triald.counters import TrialCountCriterion
 
 #: How many trial types a set can hold.
 #:
@@ -27,20 +28,6 @@ from collections.abc import Iterator
 #: fixed-width fields for it. Nothing here needs a ceiling, but the encoding does,
 #: so it stays until the ``.tdr`` question is settled - see dev/PLAN.md.
 TRIAL_TYPES_PER_SET = 256
-
-
-class SwitchCriterion(enum.StrEnum):
-    """What a set counts towards its switch rule."""
-
-    ACCEPTED_TRIALS = "accepted_trials"
-    """Trials that consumed a slot in the round."""
-
-    HITS = "hits"
-    """Trials that ended in :attr:`~triald.outcomes.TrialOutcome.HIT`.
-
-    Early hits do not count here - see
-    :data:`~triald.outcomes.HIT_OUTCOMES`.
-    """
 
 
 @dataclasses.dataclass(slots=True)
@@ -53,7 +40,7 @@ class SwitchRule:
     """
 
     enabled: bool = False
-    criterion: SwitchCriterion = SwitchCriterion.HITS
+    criterion: TrialCountCriterion = TrialCountCriterion.HITS
     count: int = 0
     """Trials of the chosen kind to complete in this set before leaving it."""
 

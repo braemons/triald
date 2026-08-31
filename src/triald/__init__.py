@@ -22,7 +22,7 @@ from triald.behaviour import (
     SimulatedBehaviourSource,
     TrialParameters,
 )
-from triald.counters import ResultCount
+from triald.counters import ResultCount, TrialCountCriterion
 from triald.metadata import (
     Device,
     MetadataError,
@@ -49,7 +49,6 @@ from triald.selection import Ordering, TrialBag
 from triald.session import Session, SessionConfig, SessionError
 from triald.state import SessionState, SetProgress, TrialRecord, TrialSpec
 from triald.trialtypes import (
-    SwitchCriterion,
     SwitchRule,
     TrialType,
     TrialTypeSet,
@@ -82,9 +81,9 @@ __all__ = [
     "SimulatedBehaviourSource",
     "Staircase",
     "Subject",
-    "SwitchCriterion",
     "SwitchRule",
     "TrialBag",
+    "TrialCountCriterion",
     "TrialOutcome",
     "TrialParameters",
     "TrialRecord",

@@ -14,9 +14,8 @@ from __future__ import annotations
 import dataclasses
 import datetime as dt
 
-from triald.counters import ResultCount
+from triald.counters import ResultCount, TrialCountCriterion
 from triald.outcomes import OutcomeReport, TrialOutcome
-from triald.trialtypes import SwitchCriterion
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -75,7 +74,8 @@ class SetProgress:
     set_name: str
     accepted_trials: int
     hits: int
-    criterion: SwitchCriterion | None
+    all_trials: int
+    criterion: TrialCountCriterion | None
     """None when the set has no armed rule."""
 
     target: int | None
@@ -86,8 +86,10 @@ class SetProgress:
     @property
     def reached(self) -> int:
         """Progress under whichever criterion the rule uses."""
-        if self.criterion is SwitchCriterion.HITS:
+        if self.criterion is TrialCountCriterion.HITS:
             return self.hits
+        if self.criterion is TrialCountCriterion.ALL_TRIALS:
+            return self.all_trials
         return self.accepted_trials
 
     @property
@@ -102,6 +104,7 @@ class SetProgress:
             "set_name": self.set_name,
             "accepted_trials": self.accepted_trials,
             "hits": self.hits,
+            "all_trials": self.all_trials,
             "criterion": self.criterion.value if self.criterion else None,
             "target": self.target,
             "switch_to": self.switch_to,
