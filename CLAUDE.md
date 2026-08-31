@@ -63,6 +63,14 @@ reaching for anything else.
 - **`trial_id` on every behaviour-source message.** It is what stops a late
   result being attributed to the next trial, which is how a rig quietly
   mislabels a dataset.
+- **Records are evidence; the manifest is a header.** Trials and events are
+  append-only and never rewritten — a correction is a new event, so the record
+  shows both what was believed and when it changed. Custom payloads are checked
+  strictly (no `default=str`): stringifying a `set` into `"{1, 2, 3}"` is silent
+  corruption of something nobody re-checks for years.
+- **Custom metadata is never interpreted.** `SessionMetadata.extra`,
+  `Device.info`, `SessionEvent.data` and `TrialType.params` are stored and
+  returned verbatim. triald has no business knowing what an electrode depth is.
 
 ## Module layout (`src/triald/`)
 
@@ -79,7 +87,8 @@ Roughly in dependency order — nothing later is imported by anything earlier.
 | `adaptive.py` | Up/down staircases (no dependencies; PsychoPy is optional and external) |
 | `behaviour.py` | `BehaviourSource`: the microcontroller seam, and the simulated subject |
 | `session.py` | The trial loop — the state machine everything hangs off |
-| `recording.py` | Append-only JSONL session records |
+| `metadata.py` | `SessionMetadata`, `Subject`, `Device`, `SessionEvent` — NWB-aligned names |
+| `recording.py` | The session directory: manifest, trials, events, summary |
 | `runner.py` | Drives a session against a behaviour source |
 | `cli.py` | `triald sim`, `triald policy check`, `triald replay` |
 

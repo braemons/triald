@@ -184,10 +184,78 @@ the base class.
 
 ### Session recording — **done**
 
-One directory per session: `manifest.json`, append-only `trials.jsonl`,
-`summary.json`. Flushed per trial, so a crash costs at most the trial in flight.
-Records carry the policy's own state, so an adaptive session is reconstructable.
-A write failure stops the experiment by default.
+A session record has to be readable years later by somebody who was not there, so
+it carries considerably more than trials. One directory per session:
+
+| File | Holds |
+|---|---|
+| `manifest.json` | who, what, which devices, the config, the seed. A header: written at open, refreshed at close. |
+| `trials.jsonl` | one line per trial, appended the moment it ends. Append-only. |
+| `events.jsonl` | everything that was not a trial. Append-only. |
+| `summary.json` | counts and the stop reason. |
+
+Flushed per trial, so a crash costs at most the trial in flight. Records carry
+the policy's own state, so an adaptive session is reconstructable. A write
+failure stops the experiment by default.
+
+#### Metadata
+
+Well-known fields, grouped as VStim groups them in `SessionMetadata`, because the
+grouping says what the UI should do with each one:
+
+- **automatic** — session id, times, host, software versions, devices;
+- **automatic with review** — experimenter, lab, institution, subject; filled in
+  from the rig config and shown for confirmation, because a stale experimenter
+  name is worse than a blank one;
+- **manual** — session type and description, keywords, notes, the `has_*` flags
+  saying what else was recorded alongside, total reward.
+
+**Field names follow NWB** — `subject_id`, `species`, `sex`, `experimenter`,
+`lab`, `institution`, `session_description`. The lab's recordings end up in NWB
+or beside something that is, and a mechanical name-for-name conversion is worth
+more than names we happen to prefer.
+
+**Devices register themselves.** Every daemon and instrument that touched the
+session appears in `devices` with its version and a free-form `info` block —
+vstimd with its display mode, the microcontroller with its firmware hash, the
+DAQ, the eye tracker, the acquisition system. The record then says what produced
+it without anybody having to remember.
+
+#### Custom messages
+
+Three places take arbitrary JSON, and **triald never interprets any of them** —
+stored and handed back verbatim, exactly like `TrialType.params`:
+
+- `SessionMetadata.extra` — whatever this lab needs that triald has never heard
+  of. Namespace your keys (`{"bremen": {...}}`) so a field triald adds later
+  cannot collide with one of yours.
+- `Device.info` — firmware hashes, display modes, sampling rates, serial numbers.
+- a `SessionEvent`'s `data` — anything at all.
+
+**Events are the custom-message channel.** An experimenter's note, a manual
+reward, an electrode depth, a device reporting in, a correction to metadata typed
+at the start. Each carries a `kind`, a `source`, the wall-clock time and the
+trial in flight. Bare `kind` names are triald's own (`note`, `reward`,
+`metadata`, `device`, `policy_error`); namespace your own with a dot
+(`bremen.electrode_depth`).
+
+Two rules keep the record trustworthy:
+
+**Corrections are appended, never applied in place.** Realising at trial 50 that
+the subject ID was typed wrong writes a new event; the manifest shows the final
+answer and the event stream shows that it changed and when. A record that
+silently shows only the final answer cannot be audited. An unknown metadata field
+is refused outright, so a typo cannot vanish into a record nobody checks.
+
+**Payloads are capped at 64 KiB and strictly checked.** Somebody will eventually
+try to put an array in here; a record indexes what happened, and bulk data
+belongs in its own file referenced by path. The serialisation check is strict on
+purpose — with a `default=str` fallback a `set` would be written as `"{1, 2, 3}"`
+and read back as a string, which is silent corruption of something nobody
+re-checks for years.
+
+Policy failures are recorded as events as well as logged, so a session that
+misbehaved at trial 200 can say why from its own directory.
 
 ### Config and persistence — **planned**
 
