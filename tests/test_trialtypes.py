@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from triald.counters import TrialCountCriterion
 from triald.trialtypes import (
-    SwitchCriterion,
     SwitchRule,
     TrialType,
     TrialTypeSet,
@@ -132,9 +132,9 @@ def test_the_criterion_travels_with_the_set():
     s = make_set(
         "a",
         2,
-        rule=SwitchRule(enabled=True, criterion=SwitchCriterion.HITS, count=9, target="b"),
+        rule=SwitchRule(enabled=True, criterion=TrialCountCriterion.HITS, count=9, target="b"),
     )
-    assert s.switch_rule.criterion is SwitchCriterion.HITS
+    assert s.switch_rule.criterion is TrialCountCriterion.HITS
     assert s.switch_rule.count == 9
 
 
