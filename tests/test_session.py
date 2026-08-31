@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from triald.counters import TrialCountCriterion
 from triald.outcomes import (
     AcceptancePolicy,
     FrameLoss,
@@ -14,7 +15,6 @@ from triald.policy import Policy
 from triald.selection import Ordering
 from triald.session import Session, SessionConfig, SessionError
 from triald.trialtypes import (
-    SwitchCriterion,
     SwitchRule,
     TrialType,
     TrialTypeSet,
@@ -205,7 +205,7 @@ def test_stop_when_rounds_done():
 
 
 def test_stop_after_accepted_trials():
-    session = make_session(rounds=100, stop_after_accepted_trials=5)
+    session = make_session(rounds=100, stop_after_trials=5)
     run(session, TrialOutcome.HIT, 20)
     assert not session.running
     assert session.state().totals.accepted == 5
@@ -214,7 +214,7 @@ def test_stop_after_accepted_trials():
 def test_stop_after_accepted_trials_counts_only_accepted_ones():
     session = make_session(
         rounds=100,
-        stop_after_accepted_trials=3,
+        stop_after_trials=3,
         acceptance=AcceptancePolicy(not_started=False),
     )
     run(session, TrialOutcome.NOT_STARTED, 10)
@@ -223,10 +223,47 @@ def test_stop_after_accepted_trials_counts_only_accepted_ones():
     assert not session.running
 
 
+def test_stop_criterion_hits():
+    session = make_session(
+        rounds=100, stop_after_trials=3, stop_criterion=TrialCountCriterion.HITS
+    )
+    # Eye errors are accepted by default, so they fill the round - but they are
+    # not hits, and the hit criterion must not see them.
+    run(session, TrialOutcome.EYE_ERROR, 10)
+    assert session.running
+    run(session, TrialOutcome.HIT, 3)
+    assert not session.running
+
+
+def test_stop_criterion_all_trials_counts_refused_ones_too():
+    session = make_session(
+        rounds=100,
+        stop_after_trials=4,
+        stop_criterion=TrialCountCriterion.ALL_TRIALS,
+        acceptance=AcceptancePolicy(not_started=False),
+    )
+    run(session, TrialOutcome.NOT_STARTED, 4)
+    assert not session.running
+    assert session.state().totals.accepted == 0  # none of them counted as accepted
+
+
+def test_the_stop_rule_is_armed_again_by_a_counter_reset():
+    # Latched so it fires once per reset, not on every trial after the count is
+    # passed - VStim's m_StoppedAfterTrials.
+    session = make_session(rounds=100, stop_after_trials=2)
+    run(session, TrialOutcome.HIT, 2)
+    assert not session.running
+
+    session.reset_counters()
+    session._running = True  # as restarting the experiment controller would
+    run(session, TrialOutcome.HIT, 2)
+    assert not session.running
+
+
 def test_stop_uses_at_least_not_equality():
     # VStim compares nDone == TrialsBeforeStop, which never fires again if the
     # counter is ever past the target. ">=" is robust to that.
-    session = make_session(rounds=100, stop_after_accepted_trials=2)
+    session = make_session(rounds=100, stop_after_trials=2)
     run(session, TrialOutcome.HIT, 1)
     assert session.running
     run(session, TrialOutcome.HIT, 1)
@@ -244,7 +281,7 @@ def test_switching_on_hits():
                 2,
                 2,
                 rule=SwitchRule(
-                    enabled=True, criterion=SwitchCriterion.HITS, count=3, target="b"
+                    enabled=True, criterion=TrialCountCriterion.HITS, count=3, target="b"
                 ),
             ),
             one_set("b", 2, 2),
@@ -264,7 +301,7 @@ def test_switching_on_accepted_trials():
                 2,
                 rule=SwitchRule(
                     enabled=True,
-                    criterion=SwitchCriterion.ACCEPTED_TRIALS,
+                    criterion=TrialCountCriterion.ACCEPTED_TRIALS,
                     count=4,
                     target="b",
                 ),
@@ -287,7 +324,7 @@ def test_a_hit_counts_towards_the_switch_even_when_it_is_refused():
                 2,
                 2,
                 rule=SwitchRule(
-                    enabled=True, criterion=SwitchCriterion.HITS, count=2, target="b"
+                    enabled=True, criterion=TrialCountCriterion.HITS, count=2, target="b"
                 ),
             ),
             one_set("b", 2, 2),
@@ -313,7 +350,7 @@ def test_an_early_hit_does_not_count_towards_the_hit_criterion():
                 2,
                 2,
                 rule=SwitchRule(
-                    enabled=True, criterion=SwitchCriterion.HITS, count=2, target="b"
+                    enabled=True, criterion=TrialCountCriterion.HITS, count=2, target="b"
                 ),
             ),
             one_set("b", 2, 2),
@@ -359,7 +396,7 @@ def test_set_progress_reports_the_right_criterion():
                 "a",
                 4,
                 rule=SwitchRule(
-                    enabled=True, criterion=SwitchCriterion.HITS, count=10, target="b"
+                    enabled=True, criterion=TrialCountCriterion.HITS, count=10, target="b"
                 ),
             ),
             one_set("b", 2),
@@ -369,7 +406,7 @@ def test_set_progress_reports_the_right_criterion():
     run(session, TrialOutcome.HIT, 4)
 
     progress = session.state().set_progress
-    assert progress.criterion is SwitchCriterion.HITS
+    assert progress.criterion is TrialCountCriterion.HITS
     assert progress.reached == 4
     assert progress.target == 10
     assert progress.fraction == pytest.approx(0.4)
@@ -423,3 +460,282 @@ def test_ascending_ordering_reaches_the_session():
     session.next_trial()
     assert session.state().current is not None
     assert session.state().current.trial_type_index == 0
+
+
+# -- per-set counter banks -------------------------------------------------------
+
+
+def two_sets() -> TrialTypeStore:
+    return TrialTypeStore([one_set("a", 2, 2), one_set("b", 2, 2)])
+
+
+def test_counts_are_kept_per_set_when_numbers_are_extended():
+    # With the extension on the sets are separate experiments whose trial type 3
+    # have nothing to do with each other, so each keeps its own counts.
+    session = make_session(
+        two_sets(), initial_set="a", rounds=100, extend_trial_type_number=True
+    )
+    run(session, TrialOutcome.HIT, 4)
+    assert sum(c.total for c in session.state().per_trial_type) == 4
+
+    session.load_set("b")
+    assert sum(c.total for c in session.state().per_trial_type) == 0
+
+    run(session, TrialOutcome.HIT, 2)
+    assert sum(c.total for c in session.state().per_trial_type) == 2
+
+    # Coming back finds set a's counts where it left them, rather than cleared.
+    session.load_set("a")
+    assert sum(c.total for c in session.state().per_trial_type) == 4
+
+
+def test_sets_share_one_bank_when_numbers_are_not_extended():
+    # Trial type 3 means the same thing in every set - it plays the same objects
+    # and shares its name - so the counts belong to the number, not the set.
+    session = make_session(
+        two_sets(), initial_set="a", rounds=100, extend_trial_type_number=False
+    )
+    run(session, TrialOutcome.HIT, 4)
+    session.load_set("b")
+
+    assert sum(c.total for c in session.state().per_trial_type) == 4
+
+
+def test_session_totals_climb_across_a_switch():
+    session = make_session(two_sets(), initial_set="a", rounds=100)
+    run(session, TrialOutcome.HIT, 4)
+    session.load_set("b")
+    run(session, TrialOutcome.HIT, 2)
+
+    assert session.state().totals.total == 6
+
+
+def test_reset_counters_clears_every_set():
+    session = make_session(
+        two_sets(), initial_set="a", rounds=100, extend_trial_type_number=True
+    )
+    run(session, TrialOutcome.HIT, 4)
+    session.load_set("b")
+    run(session, TrialOutcome.HIT, 2)
+
+    session.reset_counters()
+
+    assert sum(c.total for c in session.state().per_trial_type) == 0
+    session.load_set("a")
+    assert sum(c.total for c in session.state().per_trial_type) == 0
+
+
+# -- the all-trials criterion ----------------------------------------------------
+
+
+def test_switching_on_all_trials_counts_refused_ones():
+    store = TrialTypeStore(
+        [
+            one_set(
+                "a",
+                2,
+                2,
+                rule=SwitchRule(
+                    enabled=True,
+                    criterion=TrialCountCriterion.ALL_TRIALS,
+                    count=3,
+                    target="b",
+                ),
+            ),
+            one_set("b", 2, 2),
+        ]
+    )
+    # Not-started errors are refused by default, so they are neither accepted nor
+    # hits - but they are completed trials, and this criterion counts them.
+    session = make_session(
+        store,
+        initial_set="a",
+        rounds=100,
+        acceptance=AcceptancePolicy(not_started=False),
+    )
+    run(session, TrialOutcome.NOT_STARTED, 3)
+
+    assert session.state().totals.accepted == 0
+    assert session.state().set_name == "b"
+
+
+def test_set_progress_reports_all_three_tallies():
+    store = TrialTypeStore(
+        [
+            one_set(
+                "a",
+                4,
+                rule=SwitchRule(
+                    enabled=True,
+                    criterion=TrialCountCriterion.ALL_TRIALS,
+                    count=10,
+                    target="b",
+                ),
+            ),
+            one_set("b", 2),
+        ]
+    )
+    session = make_session(
+        store,
+        initial_set="a",
+        rounds=100,
+        acceptance=AcceptancePolicy(eye_error=False),
+    )
+    run(session, TrialOutcome.HIT, 2)
+    run(session, TrialOutcome.EYE_ERROR, 3)
+
+    progress = session.state().set_progress
+    assert progress.hits == 2
+    assert progress.accepted_trials == 2  # the eye errors were refused
+    assert progress.all_trials == 5
+    assert progress.reached == 5  # the rule counts all trials
+
+
+# -- sequences -------------------------------------------------------------------
+#
+# There is no separate "sequence" type: a sequence is what a chain of per-set
+# rules makes. Two sets pointing at each other alternate; three walk in order;
+# the last one having no rule ends the walk. Tested explicitly because it is the
+# behaviour a training session is actually left alone with overnight.
+
+
+def sequence_store(*names: str, count: int = 2) -> TrialTypeStore:
+    """Sets chained head to tail, the last one with no rule."""
+    sets = []
+    for i, name in enumerate(names):
+        rule = (
+            SwitchRule(
+                enabled=True,
+                criterion=TrialCountCriterion.HITS,
+                count=count,
+                target=names[i + 1],
+            )
+            if i + 1 < len(names)
+            else SwitchRule()
+        )
+        sets.append(one_set(name, 2, 2, rule=rule))
+    return TrialTypeStore(sets)
+
+
+def test_a_three_set_sequence_walks_in_order():
+    session = make_session(
+        sequence_store("fixation", "one_line", "one_half_cyc", count=2),
+        initial_set="fixation",
+        rounds=100,
+    )
+
+    visited = [session.state().set_name]
+    for _ in range(3):
+        run(session, TrialOutcome.HIT, 2)
+        visited.append(session.state().set_name)
+
+    assert visited == ["fixation", "one_line", "one_half_cyc", "one_half_cyc"]
+
+
+def test_the_last_set_in_a_sequence_keeps_running():
+    session = make_session(sequence_store("a", "b", count=2), initial_set="a", rounds=100)
+    run(session, TrialOutcome.HIT, 20)
+
+    assert session.state().set_name == "b"
+    assert session.running
+
+
+def test_two_sets_pointing_at_each_other_alternate():
+    store = TrialTypeStore(
+        [
+            one_set(
+                "easy",
+                2,
+                2,
+                rule=SwitchRule(
+                    enabled=True,
+                    criterion=TrialCountCriterion.HITS,
+                    count=3,
+                    target="hard",
+                ),
+            ),
+            one_set(
+                "hard",
+                2,
+                2,
+                rule=SwitchRule(
+                    enabled=True,
+                    criterion=TrialCountCriterion.HITS,
+                    count=3,
+                    target="easy",
+                ),
+            ),
+        ]
+    )
+    session = make_session(store, initial_set="easy", rounds=100)
+
+    visited = []
+    for _ in range(4):
+        run(session, TrialOutcome.HIT, 3)
+        visited.append(session.state().set_name)
+
+    assert visited == ["hard", "easy", "hard", "easy"]
+
+
+def test_each_set_in_a_sequence_uses_its_own_criterion_and_count():
+    store = TrialTypeStore(
+        [
+            one_set(
+                "a",
+                2,
+                2,
+                rule=SwitchRule(
+                    enabled=True,
+                    criterion=TrialCountCriterion.HITS,
+                    count=2,
+                    target="b",
+                ),
+            ),
+            one_set(
+                "b",
+                2,
+                2,
+                rule=SwitchRule(
+                    enabled=True,
+                    criterion=TrialCountCriterion.ALL_TRIALS,
+                    count=5,
+                    target="c",
+                ),
+            ),
+            one_set("c", 2, 2),
+        ]
+    )
+    session = make_session(store, initial_set="a", rounds=100)
+
+    run(session, TrialOutcome.HIT, 2)
+    assert session.state().set_name == "b"
+
+    # b counts every completed trial, so refused ones move it along too.
+    run(session, TrialOutcome.CANCELLED, 5)
+    assert session.state().set_name == "c"
+
+
+def test_stopping_wins_over_switching():
+    # There is nothing to switch to once the experiment is ending, and VStim
+    # orders these the same way in OnTrialCompleted().
+    store = TrialTypeStore(
+        [
+            one_set(
+                "a",
+                2,
+                2,
+                rule=SwitchRule(
+                    enabled=True,
+                    criterion=TrialCountCriterion.HITS,
+                    count=3,
+                    target="b",
+                ),
+            ),
+            one_set("b", 2, 2),
+        ]
+    )
+    session = make_session(store, initial_set="a", rounds=100, stop_after_trials=3)
+    run(session, TrialOutcome.HIT, 3)
+
+    assert not session.running
+    assert session.state().set_name == "a"

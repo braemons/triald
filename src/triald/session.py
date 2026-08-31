@@ -19,7 +19,7 @@ import logging
 import random
 from typing import Any
 
-from triald.counters import ResultCount
+from triald.counters import ResultCount, TrialCountCriterion
 from triald.metadata import SessionEvent
 from triald.outcomes import (
     HIT_OUTCOMES,
@@ -33,7 +33,6 @@ from triald.selection import Ordering, TrialBag
 from triald.state import SessionState, SetProgress, TrialRecord, TrialSpec
 from triald.trialtypes import (
     TRIAL_TYPES_PER_SET,
-    SwitchCriterion,
     TrialTypeSet,
     TrialTypeStore,
 )
@@ -66,12 +65,16 @@ class SessionConfig:
     stop_when_rounds_done: bool = False
     """Stop after the last trial of the last round. VStim's ``m_StopIfDone``."""
 
-    stop_after_accepted_trials: int | None = None
-    """Stop once this many trials have been accepted since the counters were reset.
+    stop_after_trials: int | None = None
+    """Stop once this many trials of :attr:`stop_criterion` have been counted.
 
-    A block length that does not depend on the weights, which is the thing
-    :attr:`stop_when_rounds_done` cannot express (VStim issue #460).
+    Counted since the counters were last reset. A block length that does not
+    depend on the weights, which is the thing :attr:`stop_when_rounds_done`
+    cannot express (VStim issue #460).
     """
+
+    stop_criterion: TrialCountCriterion = TrialCountCriterion.ACCEPTED_TRIALS
+    """Which trials :attr:`stop_after_trials` counts."""
 
     extend_trial_type_number: bool = False
     """Make the effective trial type number ``set_number * 256 + index``.
@@ -118,10 +121,26 @@ class Session:
         self._trial_number = 0
         self._rounds_completed = 0
         self._totals = ResultCount()
-        self._per_type: list[ResultCount] = []
+
+        # Per-trial-type counters, banked by set. With the trial type number
+        # extended by the set number the sets are separate experiments whose
+        # trial type 3 have nothing to do with each other, so each keeps its own
+        # counts; without it, trial type 3 means the same thing in every set and
+        # they share one bank. VStim reaches the same result with a
+        # CounterOffset into one flat array.
+        #
+        # Banking rather than clearing on load is what stops a session that
+        # alternates between two sets losing a set's counts every time it comes
+        # back to it.
+        self._per_type_banks: dict[str, list[ResultCount]] = {}
 
         self._accepted_in_set = 0
         self._hits_in_set = 0
+        self._all_trials_in_set = 0
+
+        # Latched so the stop fires once per counter reset rather than on every
+        # trial after the count is passed. VStim's m_StoppedAfterTrials.
+        self._stopped_after_trials = False
 
         self._running = False
         self._recording = False
@@ -175,12 +194,12 @@ class Session:
             avoid_repeat=self._config.avoid_repeat,
             rng=self._rng,
         )
-        self._per_type = [ResultCount() for _ in self._set]
         self._sync_remaining()
 
         self._running = True
         self._stop_requested = False
         self._stop_reason = None
+        self._stopped_after_trials = False
 
         safe_call(
             self._policy.on_session_start,
@@ -365,6 +384,7 @@ class Session:
             self._hits_in_set += 1
         if accepted:
             self._accepted_in_set += 1
+        self._all_trials_in_set += 1
 
     def _advance(self, accepted: bool) -> None:
         """Consume from the bag, close the round, switch sets, check the stops."""
@@ -390,14 +410,34 @@ class Session:
                 self._bag.refill()
                 self._sync_remaining()
 
-        # ">=" rather than VStim's "==". Equality fires exactly once and silently
-        # never fires again if a counter is ever reset or jumps past the target.
-        limit = self._config.stop_after_accepted_trials
-        if limit is not None and limit > 0 and self._totals.accepted >= limit:
-            self.stop(f"{limit} trials accepted")
-            return
+        # Stopping wins over switching: there is nothing to switch to once the
+        # experiment is ending. VStim orders these the same way in
+        # OnTrialCompleted().
+        if not self._stop_after_trials_if_due():
+            self._apply_switch_if_due()
 
-        self._apply_switch_if_due()
+    def _stop_after_trials_if_due(self) -> bool:
+        """Stop if enough trials of the chosen kind have been counted (#460).
+
+        Latched, so it fires once per counter reset rather than on every trial
+        after the count is passed. The comparison is ">=" rather than an
+        equality, which would silently never fire again if a counter jumped past
+        the target.
+        """
+        if self._stopped_after_trials:
+            return False
+
+        limit = self._config.stop_after_trials
+        if limit is None or limit <= 0:
+            return False
+
+        criterion = self._config.stop_criterion
+        if self._totals.counted(criterion) < limit:
+            return False
+
+        self._stopped_after_trials = True
+        self.stop(f"{limit} {criterion.value.replace('_', ' ')} counted")
+        return True
 
     def _apply_switch_if_due(self) -> bool:
         """Load the set this one's rule points at, if its criterion is reached."""
@@ -409,12 +449,7 @@ class Session:
         if rule.target == self._set.name:
             return False
 
-        reached = (
-            self._hits_in_set
-            if rule.criterion is SwitchCriterion.HITS
-            else self._accepted_in_set
-        )
-        if reached < rule.count:
+        if self._counted_in_set(rule.criterion) < rule.count:
             return False
 
         if rule.target not in self._store:
@@ -465,10 +500,10 @@ class Session:
             avoid_repeat=self._config.avoid_repeat,
             rng=self._rng,
         )
-        self._per_type = [ResultCount() for _ in target]
         self._rounds_completed = 0
         self._accepted_in_set = 0
         self._hits_in_set = 0
+        self._all_trials_in_set = 0
         self._sync_remaining()
 
     def reset_rounds(self) -> None:
@@ -479,14 +514,34 @@ class Session:
         self._rounds_completed = 0
         self._accepted_in_set = 0
         self._hits_in_set = 0
+        self._all_trials_in_set = 0
 
     def reset_counters(self) -> None:
-        """Clear every outcome tally. The bag and the round are left alone."""
+        """Clear every outcome tally, in every set. The bag and round are left alone.
+
+        Every bank, not only the loaded set's: VStim's Reset Counts clears them
+        all, and a half-cleared session is worse than either state.
+        """
         self._totals.reset()
-        for c in self._per_type:
-            c.reset()
+        for bank in self._per_type_banks.values():
+            for c in bank:
+                c.reset()
         self._accepted_in_set = 0
         self._hits_in_set = 0
+        self._all_trials_in_set = 0
+        # The stop rule counts since the last reset, so it is armed again.
+        self._stopped_after_trials = False
+
+    _SHARED_BANK = ""
+
+    @property
+    def _per_type(self) -> list[ResultCount]:
+        """The counter bank the loaded set counts into, grown to fit it."""
+        key = self._set.name if self._config.extend_trial_type_number else self._SHARED_BANK
+        bank = self._per_type_banks.setdefault(key, [])
+        while len(bank) < len(self._set):
+            bank.append(ResultCount())
+        return bank
 
     def _sync_remaining(self) -> None:
         assert self._bag is not None
@@ -558,6 +613,14 @@ class Session:
             config=self._config.as_dict(),
         )
 
+    def _counted_in_set(self, criterion: TrialCountCriterion) -> int:
+        """Progress of the loaded set under `criterion`, since it was loaded."""
+        if criterion is TrialCountCriterion.HITS:
+            return self._hits_in_set
+        if criterion is TrialCountCriterion.ALL_TRIALS:
+            return self._all_trials_in_set
+        return self._accepted_in_set
+
     def _set_progress(self) -> SetProgress:
         rule = self._set.switch_rule
         armed = rule.is_armed()
@@ -565,6 +628,7 @@ class Session:
             set_name=self._set.name,
             accepted_trials=self._accepted_in_set,
             hits=self._hits_in_set,
+            all_trials=self._all_trials_in_set,
             criterion=rule.criterion if armed else None,
             target=rule.count if armed else None,
             switch_to=rule.target if armed else None,
