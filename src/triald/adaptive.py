@@ -10,9 +10,10 @@ that specialises in it:
   ``MultiStairHandler``, which is worth the weight when a triald staircase has to
   match an existing PsychoPy experiment exactly.
 
-Neither is a dependency of triald. Point ``policy_path`` in the rig config at a
-virtualenv that has them and import them from your policy - see
-docs/scripting.md.
+Neither is a dependency of triald. On a rig, install them into the daemon's own
+interpreter with ``trialctl env install questplus`` and import them from your
+policy; numpy and scipy are already there. See dev/PLAN.md, "The runtime
+environment".
 
 These classes are deliberately *not* policies. They are the arithmetic; a
 :class:`~triald.policy.Policy` decides how a level maps onto a trial type, which

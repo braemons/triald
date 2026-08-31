@@ -83,8 +83,13 @@ Roughly in dependency order — nothing later is imported by anything earlier.
 | `runner.py` | Drives a session against a behaviour source |
 | `cli.py` | `triald sim`, `triald policy check`, `triald replay` |
 
-Not built yet: `rpc/` (ZMQ + protobuf) and `web/` (FastAPI + WebSocket). Both are
-specified in `dev/PLAN.md`.
+Not built yet: `rpc/` (ZMQ + protobuf), `web/` (FastAPI + WebSocket, with a
+CodeMirror policy editor and configurable uPlot performance charts), and
+`client/{python,matlab,bonsai}`. All specified in `dev/PLAN.md`.
+
+**The protobuf schema comes before all of them.** Three clients plus the web UI
+are written against the wire format, not against `triald.Session`, so the schema
+is the contract and must not be discovered incrementally.
 
 ## Testing
 
@@ -101,5 +106,10 @@ ships. The systemd/sysusers/logrotate layout and the tag-derived versioning are
 lifted from vstimd. Config at `/etc/braemons/triald.toml`, state in
 `/var/lib/triald`.
 
-**Do not add PsychoPy to the package.** It drags a GUI stack onto a headless rig
-box. Point `policy_path` at a virtualenv that has it instead.
+numpy and scipy *are* in the package — without numpy, "scriptable in Python" is
+a hollow promise. **PsychoPy is not**, and must not be: it drags pyglet, wx and a
+GUI stack onto a headless rig box. Anything beyond numpy/scipy is installed into
+the daemon's own vendored interpreter via `trialctl env install`, and listed in
+the rig config's `extra_packages` so a rebuilt rig is reproducible. Never a
+separate virtualenv on `sys.path` — a venv built against a different Python fails
+with an ABI error nobody enjoys reading.

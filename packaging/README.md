@@ -24,14 +24,21 @@ either — the RPC and web surfaces are step 3 and 4.
 | Path | Purpose |
 |---|---|
 | `/opt/braemons/triald/` | the vendored interpreter and the package |
-| `/etc/braemons/triald.toml` | rig config — endpoints, results dir, `policy_path` |
+| `/etc/braemons/triald.toml` | rig config — endpoints, results dir, `policy_dir`, `extra_packages` |
 | `/var/lib/triald/` | state and recorded sessions |
 | `/var/log/triald/` | logs, rotated weekly |
 
 `triald` runs as its own unprivileged user, created via the sysusers entry.
 
-## Do not add PsychoPy to the package
+## What goes in the package, and what does not
 
-It drags pyglet, wx and a GUI stack onto a headless rig box. Labs that want
-`QuestHandler` or `PsiHandler` should build a virtualenv and point `policy_path`
-at it — see `dev/PLAN.md`.
+**In:** numpy and scipy. Roughly 80 MB together, against a vendored CPython
+already around 50–80 MB. Not shipping them is discovered at 2 a.m. when a policy
+will not load on the rig; shipping them costs disk. If the Pi image gets tight,
+split scipy into a `triald-scipy` package that the main one `Recommends:`.
+
+**Out:** PsychoPy. It drags pyglet, wx and a GUI stack onto a headless rig box.
+Labs that want `QuestHandler` or `PsiHandler` install it into the daemon's own
+vendored interpreter with `trialctl env install psychopy`, which is
+ABI-compatible by construction because there is only one interpreter. See
+`dev/PLAN.md`, "The runtime environment".

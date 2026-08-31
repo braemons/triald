@@ -26,8 +26,9 @@ serve = [
 serial = ["pyserial>=3.5"]
 
 # Adaptive procedures beyond the up/down family in triald.adaptive. Never a hard
-# dependency: PsychoPy drags a GUI stack onto a headless rig box, so prefer
-# pointing policy_path at a virtualenv that has it. See docs/scripting.md.
+# dependency: PsychoPy drags a GUI stack onto a headless rig box. On a rig these
+# are installed into the daemon's own vendored interpreter with
+# `trialctl env install` rather than declared here. See dev/PLAN.md.
 adaptive = ["questplus>=2023.1"]
 
 [project.scripts]

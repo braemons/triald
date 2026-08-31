@@ -1,7 +1,8 @@
 # Trial Control Daemon — triald
 
 > **Status:** early alpha — the domain logic and the scripting API work and are
-> tested. The RPC surface, the web UI and the packaging are not built yet.
+> tested. The RPC surface, the web UI, the clients and the packaging are not
+> built yet.
 
 **triald** decides what trial runs next, records what happened, and lets you write
 the decision in Python. It is the part of a behavioural rig that owns trial
@@ -85,6 +86,18 @@ between.
 | Accept flags per outcome | Adaptive stopping criteria |
 | Round counts and stop rules | Anything conditional on history |
 | Set switch rules | Switching on something the rule cannot express |
+
+## Planned
+
+A web UI served by the daemon: live counters, a small CodeMirror policy editor for
+tweaks between blocks, and performance charts you configure rather than accept —
+running hit rate, psychometric curves against a trial type's parameters, staircase
+traces, reaction times. Anything a policy returns from `snapshot()` is plottable
+without extra work.
+
+Clients for **Python**, **MATLAB** (over HTTP and JSON, so no toolbox and no
+MATLAB-to-Python version matching) and **Bonsai** (a NuGet package whose source
+and sink operators map onto the state stream directly).
 
 ## Documentation
 
