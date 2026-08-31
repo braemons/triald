@@ -139,8 +139,48 @@ is wrapped: an exception is logged with a traceback, recorded against the trial,
 and the session carries on.
 
 Up/down staircases ship in `triald.adaptive` with no dependencies. QUEST, Psi and
-interleaved staircases come from `questplus` or PsychoPy, via a `policy_path`
-virtualenv — never from the package itself.
+interleaved staircases come from `questplus` or PsychoPy — see *The runtime
+environment* below.
+
+#### How a policy reaches the daemon — **planned**
+
+Today `load_policy()` takes a filesystem path on the machine running the daemon,
+which is all `triald sim` needs. Over RPC that is the wrong shape: the rig is not
+your laptop.
+
+**The daemon receives the source text and owns it from then on.**
+
+```
+1. write     my_staircase.py in your editor, under git
+2. check     trialctl policy check my_staircase.py   uploads, smoke-runs, discards
+3. load      trialctl policy load  my_staircase.py   uploads, stores, arms
+4. daemon    writes /var/lib/triald/policies/<sha256>.py, imports it,
+             swaps it in at the next trial boundary — never mid-trial
+5. record    manifest.json carries the sha256 and a verbatim copy
+```
+
+Three reasons the daemon must hold the text rather than a path:
+
+- the web editor needs to show and edit it, and a path means nothing to a browser
+  on another machine;
+- **provenance** — "which version of the staircase ran on Tuesday?" has to be
+  answerable from the session directory alone, and a filename cannot answer it
+  because the file changes. Same argument as recording the RNG seed;
+- otherwise every policy change needs scp or a file share, which is how a rig
+  ends up running a script nobody can find the source of.
+
+Loading from a path stays as the escape hatch, for a lab keeping policies in a
+git checkout on the rig itself. Either way the record is written the same way:
+hash plus a stored copy.
+
+**This is remote code execution by design, and should be a choice rather than a
+discovery.** Fine on an isolated rig network — it is what makes the daemon useful
+— but: bind to localhost or the rig subnet by default, never `0.0.0.0`; keep
+running as the unprivileged `triald` user under `ProtectSystem=strict`; and offer
+a rig-config flag that refuses uploads and loads only from a trusted directory.
+The `Policy` API can only return decisions, but a policy is still Python in the
+daemon's process — the sandbox is the process boundary and the systemd unit, not
+the base class.
 
 ### Session recording — **done**
 
@@ -154,13 +194,66 @@ A write failure stops the experiment by default.
 Two configs, always named:
 
 - **rig config** — the physical setup: endpoints, results directory, serial port,
-  `policy_path`. TOML at `/etc/braemons/triald.toml`. Changes when the hardware
-  does.
+  `policy_dir`, `extra_packages`. TOML at `/etc/braemons/triald.toml`. Changes
+  when the hardware does.
 - **session config** — one experiment: sets, ordering, accept flags, stop rules,
   policy. Changes per session.
 
 Needs: round-trip to a human-readable file, and an importer for existing VStim
 configurations.
+
+`policy_dir` is where the daemon stores uploaded policies. It is deliberately
+*not* the earlier `policy_path`, which conflated two unrelated things — where
+policies come from, and where their dependencies live. Dependencies are the
+runtime environment's problem, below.
+
+### The runtime environment — **planned**
+
+**numpy and scipy ship in the package.** Without numpy, "scriptable in Python" is
+a hollow promise — the first thing anyone writes wants `np.array`, and
+`questplus` requires numpy plus xarray. scipy earns its place for `scipy.stats`
+psychometric functions and `scipy.optimize` fitting. Roughly 20 MB and 60 MB
+against a vendored-CPython package already around 50–80 MB; modern scipy wheels
+bundle their own OpenBLAS, so there is no BLAS/LAPACK mess to inherit.
+
+The asymmetry decides it: not shipping them is discovered at 2 a.m. when a policy
+will not load on the rig. Shipping them costs 60 MB. If the Raspberry Pi image
+ever gets tight, scipy splits into a `triald-scipy` package that the main one
+`Recommends:` — installed by default, removable. Not worth doing pre-emptively.
+
+**For everything else, extend the environment that is actually running.** The
+vendored tree at `/opt/braemons/triald` is a real Python installation, so:
+
+```
+trialctl env install questplus psychopy
+trialctl env list
+trialctl env freeze > rig-packages.txt
+```
+
+serviced by `uv pip install --python /opt/braemons/triald/bin/python`. Everything
+is ABI-compatible by construction because there is only one interpreter. This
+replaces the earlier idea of a separate virtualenv on `sys.path`, which would
+break the moment its Python differed from the vendored one — and fail with an ABI
+error nobody enjoys reading.
+
+Two things have to come with it or rigs drift out of step with each other:
+
+- **declarative, not only imperative** — the rig config carries an
+  `extra_packages` list applied at startup, so a rebuilt rig is reproducible and
+  `env install` means "add to the list and apply";
+- **in the record** — the session manifest carries the resolved package set, for
+  the same reason it carries the seed and the policy hash. "Which questplus
+  version produced Tuesday's thresholds" has to be answerable from the session
+  directory.
+
+Shipping numpy and scipy largely removes the need for any of this: most people
+will never run `env install`. It exists for `questplus`, PsychoPy, and whatever a
+lab has of its own.
+
+**PsychoPy is never a dependency of the package.** It drags pyglet, wx and a GUI
+stack onto a headless rig box. `env install psychopy` for labs whose triald
+staircase has to match an existing PsychoPy experiment exactly; prefer the
+standalone `questplus`, or `triald.adaptive`, otherwise.
 
 ### RPC surface — **planned**
 
@@ -173,16 +266,123 @@ ZMQ + protobuf, mirrored over WebSocket for the web UI, matching vstimd's shape.
 | State | `GetState`, `Subscribe → stream`, `GetCounters` |
 | Sets | `ListSets`, `LoadSet`, `SaveSet` |
 | Config | `GetConfig`, `SetConfig`, `ResetRounds`, `ResetCounters` |
-| Scripting | `LoadPolicy`, `CheckPolicy`, `GetPolicyState` |
+| Scripting | `LoadPolicy(name, source) → sha256`, `CheckPolicy(source) → diagnostics`, `GetPolicy → name, source, sha256`, `GetPolicyState` |
+| Environment | `ListPackages`, `InstallPackages`, `GetEnvironment` |
 | Records | `ListSessions`, `GetSession`, `ReplaySession` |
+
+`LoadPolicy` and `CheckPolicy` take **source text**, not a path — see *How a
+policy reaches the daemon*. `CheckPolicy` returns diagnostics with line numbers
+so the web editor can mark the offending line rather than printing a traceback
+underneath it.
+
+**The wire protocol is the contract, not the Python API.** Three clients are
+planned, so the protobuf schema is written first and every client is generated or
+hand-written against it — never against `triald.Session`.
 
 ### Web interface — **planned**
 
-Served by the daemon, no separate deployment. Live session view: current trial
-type, trial number, per-type counters, progress through the round and towards the
-switch rule, recent outcomes. Plus editing the declarative config and the sets,
-starting and stopping recording, loading and checking a policy, and reading the
-traceback when one fails.
+Served by the daemon, no separate deployment, speaking the same protobuf over
+WebSocket rather than a second bespoke API.
+
+**Session view.** Current trial type, trial number, per-type counters, progress
+through the round and towards the switch rule, recent outcomes. The numbers VStim
+shows in its counter dialogs, visible from any machine on the rig network instead
+of the one keyboard in the booth. Plus editing the declarative config and the
+trial type sets, starting and stopping recording, and reading the traceback when
+a policy fails, against the trial that raised it.
+
+#### The policy editor
+
+**CodeMirror 6** with `@codemirror/lang-python` — about 200 KB, against Monaco's
+2 MB-plus. Syntax highlighting, bracket matching and gutter error markers are
+what this needs; it is not trying to be an IDE.
+
+Because it should not become one. **The web editor is for a tweak between blocks,
+not for authoring** — bump a threshold, fix a typo, restart the staircase, with
+the real work in your own editor under git. If it becomes the primary path,
+policies stop being version-controlled, which is one of the things triald exists
+to fix. So:
+
+- **read-only by default**, showing the running policy and its content hash;
+- an explicit Edit mode, and **Check before Load is not skippable** — a syntax
+  error must never reach a session;
+- diagnostics marked in the gutter, from `CheckPolicy`;
+- a visible **"edited in browser"** marker on a policy that did not come from a
+  file, so a session record cannot quietly contain a script nobody has in git;
+- swapped in at the next trial boundary, never mid-trial.
+
+#### Performance graphs
+
+Customisable, because every lab watches something slightly different and
+hard-coding four charts guarantees three of them are the wrong ones.
+
+The data model makes this cheap: **every trial is a row with a known schema**, so
+a chart is a small declarative spec rather than code.
+
+| Field | From |
+|---|---|
+| `trial_number`, `trial_type_name`, `set_name` | `TrialSpec` |
+| `outcome`, `accepted`, `refusal_reason` | the acceptance decision |
+| `reaction_time_ms`, `terminating_interval`, `precise_fixation`, `frame_loss`, `reward_ms` | the outcome modifiers |
+| `params.*` | `TrialType.params` — contrast, coherence, whatever the paradigm has |
+| `policy_state.*` | whatever `Policy.snapshot()` returned |
+
+A spec picks a metric, an x-axis, an optional grouping, a window and a filter:
+
+```toml
+[[chart]]
+title    = "Hit rate by contrast"
+y        = "rate(outcome == HIT)"
+x        = "params.contrast"
+group_by = "set_name"
+window   = 200          # trials; omit for the whole session
+filter   = "accepted"
+```
+
+**Anything a policy puts in `snapshot()` becomes a plottable series for free** —
+a staircase's level and reversal count are already in every trial record, so
+the staircase trace needs no special support.
+
+Ships with sensible defaults that a lab can then edit: running hit rate over
+trials, performance per trial type, accuracy against a `params` value (a
+psychometric curve), the staircase trace, reaction time over trials and its
+distribution, outcome breakdown over time, session pace in trials per minute, and
+progress towards the round and the switch criterion.
+
+**uPlot** (~40 KB) for the rendering — it is built for live time series and
+redraws cheaply at the 1 Hz the session view updates at. The chart vocabulary
+here is narrow (line, bar, scatter over trials), so a full grammar of graphics is
+more than the domain needs; if the spec starts growing towards one, Vega-Lite is
+the thing to move to rather than to reinvent.
+
+Two requirements that keep it useful rather than decorative: layouts are **saved
+per rig** and travel with the rig config, and **the same spec works on a recorded
+session**, so "why did Tuesday look odd" uses the same tool as the live view.
+Export to PNG and CSV, so a chart can go into a lab notebook.
+
+### Clients — **planned**
+
+Three, against the protobuf schema rather than against each other.
+
+**Python** (`client/python`) — the reference client, mirroring vstimd's. LGPLv3
+rather than the daemon's AGPLv3, so importing it does not place an experiment's
+own code under copyleft — the same split vstimd uses, and for the same reason.
+
+**MATLAB** (`client/matlab`) — over **HTTP and JSON**, not protobuf. `webread`
+and `webwrite` are built in, need no toolbox, and avoid the MATLAB-to-Python
+version matching that makes the `py.` bridge painful in practice. The web API
+exists anyway, so this is nearly free. The `py.` bridge stays documented as an
+option for anyone wanting the full typed client.
+
+**Bonsai** (`client/bonsai`) — a `Bonsai.Triald` NuGet package exposing source
+and sink operators. Bonsai is reactive, so the mapping is unusually clean: the
+`Subscribe` state stream *is* an observable sequence, `NextTrial` is a source, and
+`ReportOutcome` is a sink. Transport over ZeroMQ via NetMQ, or WebSocket, matching
+whatever `Bonsai.ZeroMQ` already does well.
+
+Each client ships the same small example — arm a session, run trials, report
+outcomes — and CI runs it against the daemon, so the three cannot drift apart
+silently.
 
 ### Microcontroller link — **planned**
 
@@ -254,8 +454,17 @@ imported by triald, avoids reimplementing the binary reader entirely.
 
 1. ~~Domain logic, policy API, simulator, tests~~ — **done**
 2. Session and rig config files, and the VStim importer
-3. RPC surface (protobuf schema first, shared with the web UI)
-4. Web interface
-5. `SerialBehaviourSource` and reference firmware
-6. Packaging: nfpm, systemd, the apt archive
-7. `ReplaySession`
+3. **The protobuf schema.** First, and on its own: the RPC surface, the web UI
+   and all three clients are generated or written against it, so it is the one
+   thing that must not be discovered incrementally.
+4. RPC surface over ZMQ, plus policy upload and storage
+5. Web interface — session view, then the CodeMirror editor, then the charts
+6. Python client, then MATLAB (HTTP/JSON), then Bonsai
+7. `SerialBehaviourSource` and reference firmware
+8. Packaging: numpy and scipy in the tree, nfpm, systemd, the apt archive,
+   `trialctl env`
+9. `ReplaySession`
+
+The ordering has one real constraint: step 3 precedes everything downstream of
+it. Steps 5 and 6 can run in parallel once it exists, and step 7 is independent
+of both.
