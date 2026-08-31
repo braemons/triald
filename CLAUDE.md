@@ -56,6 +56,17 @@ reaching for anything else.
   TrialsBeforeStop`, which silently never fires again if a counter jumps.
 - **Sets are addressed by name**, not by a 1-based index into a fixed array. An
   index-based rule points somewhere else the moment sets are reordered.
+- **A sequence is a chain of per-set rules**, not a separate type. Two sets
+  pointing at each other alternate; three walk in order; a set with no rule ends
+  the walk.
+- **One `TrialCountCriterion`** for both the switch rule and the stop rule —
+  accepted trials, hits, or all completed trials. The question is the same one in
+  both places, and two enums would drift.
+- **Stopping wins over switching.** There is nothing to switch to once the
+  experiment is ending.
+- **Counters are banked per set** when trial type numbers are extended, shared
+  when they are not. Banking rather than clearing on load is what stops a session
+  that alternates between two sets losing a set's counts each time it returns.
 - **The microcontroller never learns the trial type.** It gets a
   `TrialParameters` block — correct channel, windows, reward — so firmware stays
   stable while paradigms change. It is the *timing* authority; triald is the

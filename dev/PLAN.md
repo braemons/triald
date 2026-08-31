@@ -115,8 +115,13 @@ Round = sum of the weights; experiment = rounds × round. Stop when rounds are
 done; stop after N accepted trials (#460); reset rounds and reset counters as
 separate operations.
 
-**New:** stop conditions compare `>=` rather than VStim's `==`, which fires
-exactly once and silently never fires again if a counter jumps.
+Stop-after-N takes a **criterion** of its own — accepted trials, hits, or every
+completed trial whatever it ended in. The same `TrialCountCriterion` the switch
+rule uses, because the question is the same one and two enums would drift.
+
+The stop is **latched**, so it fires once per counter reset rather than on every
+trial after the count is passed, and compares `>=` rather than an equality that
+would silently never fire again if a counter jumped.
 
 ### Automatic set switching — **done** (#239)
 
@@ -127,9 +132,36 @@ running, or a set with no trials in it, which would otherwise divide by zero. Th
 whole chain is validated at arm time, so a set three hops away that nobody filled
 in is caught before a session is left alone with it overnight.
 
+Three criteria, shared with the stop rule: accepted trials, hits, or every
+completed trial. Each set carries its own criterion and count, so the stages of a
+sequence can be judged differently.
+
+**A sequence is what a chain of rules makes** — there is no separate type for it.
+Two sets pointing at each other alternate; three walk in order; a set with no
+rule ends the walk. `fixation → one_line → one_half_cyc` is the shape a training
+session is actually left alone with overnight, and is what `triald sim` runs.
+
+A switch restarts round counting and the new set's block progress, while the
+**session totals keep climbing across it**.
+
+**Stopping wins over switching**: there is nothing to switch to once the
+experiment is ending. VStim orders these the same way in `OnTrialCompleted()`.
+
 Faithful to VStim: **only `HIT` counts towards the hit criterion**, not
 `EARLY_HIT` — VStim increments `m_HitsInCurrentSet` in `OnHit()` alone. Worth
 revisiting with the lab, since it changes how long a training block runs.
+
+#### Counters are banked per set
+
+With **extended trial type numbers** the sets are separate experiments whose
+trial type 3 have nothing to do with each other, so each set keeps its own
+counters. Without the extension, trial type 3 means the same thing in every set —
+it plays the same objects and shares its name (#538) — so they share one bank.
+VStim reaches the same result with a `CounterOffset` into one flat array.
+
+Banking rather than clearing on load is what stops a session that alternates
+between two sets losing a set's counts every time it comes back to it. Reset
+Counts clears every bank, not only the loaded one.
 
 ### Scripting — **done**
 

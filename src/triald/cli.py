@@ -236,32 +236,63 @@ def _cmd_replay(args: argparse.Namespace) -> int:
 
 
 def _demo_experiment() -> tuple[TrialTypeStore, SessionConfig]:
-    """Two sets, the first switching to the second after 20 hits."""
-    from triald.trialtypes import SwitchCriterion, SwitchRule
+    """A three-set training sequence that walks itself.
 
-    easy = TrialTypeSet(
-        name="fixation",
-        trial_types=[
-            TrialType(name="fix_only", trials_per_round=4, reward_ms=120),
-            TrialType(name="fix_dim", trials_per_round=2, reward_ms=140),
-        ],
-        switch_rule=SwitchRule(
-            enabled=True, criterion=SwitchCriterion.HITS, count=20, target="one_line"
-        ),
+    fixation -> one_line -> one_half_cyc, each handing over after enough hits.
+    This is the shape a training session actually runs in, and the reason the
+    switch rules exist: until now somebody had to load the next set by hand at
+    the end of every block.
+    """
+    from triald.counters import TrialCountCriterion
+    from triald.trialtypes import SwitchRule
+
+    def handover(target: str, hits: int) -> SwitchRule:
+        return SwitchRule(
+            enabled=True,
+            criterion=TrialCountCriterion.HITS,
+            count=hits,
+            target=target,
+        )
+
+    store = TrialTypeStore(
+        [
+            TrialTypeSet(
+                name="fixation",
+                trial_types=[
+                    TrialType(name="fix_only", trials_per_round=4, reward_ms=120),
+                    TrialType(name="fix_dim", trials_per_round=2, reward_ms=140),
+                ],
+                switch_rule=handover("one_line", 20),
+            ),
+            TrialTypeSet(
+                name="one_line",
+                trial_types=[
+                    TrialType(name="line_0deg", trials_per_round=3, reward_ms=160),
+                    TrialType(name="line_90deg", trials_per_round=3, reward_ms=160),
+                ],
+                switch_rule=handover("one_half_cyc", 20),
+            ),
+            TrialTypeSet(
+                name="one_half_cyc",
+                trial_types=[
+                    TrialType(name="cyc_left", trials_per_round=3, reward_ms=180),
+                    TrialType(name="cyc_right", trials_per_round=3, reward_ms=180),
+                ],
+            ),
+        ]
     )
-    harder = TrialTypeSet(
-        name="one_line",
-        trial_types=[
-            TrialType(name="line_0deg", trials_per_round=3, reward_ms=160),
-            TrialType(name="line_90deg", trials_per_round=3, reward_ms=160),
-        ],
-    )
-    store = TrialTypeStore([easy, harder])
     config = SessionConfig(
         initial_set="fixation",
         ordering=Ordering.RANDOM_IN_ROUND,
         rounds=5,
         seed=0,
+        # These three stages are genuinely different experiments whose trial
+        # type 0 have nothing to do with each other, which is exactly what the
+        # extension is for: each set then keeps its own counts. With it off the
+        # sets would share one counter bank indexed by trial type number, which
+        # is right when they run the same conditions and share names (#538) -
+        # and misleading here, where they do not.
+        extend_trial_type_number=True,
     )
     return store, config
 
