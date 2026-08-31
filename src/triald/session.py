@@ -20,6 +20,7 @@ import random
 from typing import Any
 
 from triald.counters import ResultCount
+from triald.metadata import SessionEvent
 from triald.outcomes import (
     HIT_OUTCOMES,
     AcceptancePolicy,
@@ -83,9 +84,6 @@ class SessionConfig:
 
     seed: int | None = None
     """RNG seed. Generated and recorded when None, so every session is replayable."""
-
-    metadata: dict[str, object] = dataclasses.field(default_factory=dict)
-    """Subject, experimenter, notes. Written into the session record verbatim."""
 
     def as_dict(self) -> dict[str, Any]:
         d = dataclasses.asdict(self)
@@ -583,15 +581,29 @@ class Session:
         return set_number * TRIAL_TYPES_PER_SET + index
 
     def _note_policy_error(self, hook: str, exc: Exception, formatted: str) -> None:
-        self._policy_errors.append(
-            {
-                "hook": hook,
-                "trial_number": self._trial_number,
-                "error": f"{type(exc).__name__}: {exc}",
-                "traceback": formatted,
-                "at": self._clock().isoformat(),
-            }
-        )
+        error = {
+            "hook": hook,
+            "trial_number": self._trial_number,
+            "error": f"{type(exc).__name__}: {exc}",
+            "traceback": formatted,
+            "at": self._clock().isoformat(),
+        }
+        self._policy_errors.append(error)
+
+        # Into the record as well as the log. A session that behaved oddly at
+        # trial 200 should be able to say why from its own directory.
+        if self._recorder is not None:
+            try:
+                self._recorder.event(
+                    SessionEvent(
+                        kind="policy_error",
+                        data=error,
+                        source="triald",
+                        trial_number=self._trial_number,
+                    )
+                )
+            except Exception:
+                log.exception("could not record the policy error; ignoring")
 
 
 def _wall_clock() -> dt.datetime:

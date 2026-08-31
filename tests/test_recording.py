@@ -9,8 +9,17 @@ from pathlib import Path
 import pytest
 
 from triald.behaviour import SimulatedBehaviourSource
+from triald.metadata import (
+    SessionMetadata,
+    Subject,
+)
 from triald.outcomes import OutcomeReport, TrialOutcome
-from triald.recording import RecordingError, SessionRecorder, read_session
+from triald.recording import (
+    RecordingError,
+    SessionRecorder,
+    read_manifest,
+    read_session,
+)
 from triald.runner import run_session
 from triald.session import Session, SessionConfig
 from triald.trialtypes import TrialType, TrialTypeSet, TrialTypeStore
@@ -31,15 +40,32 @@ def store() -> TrialTypeStore:
 
 
 def test_a_manifest_is_written_on_open(tmp_path: Path):
-    recorder = SessionRecorder(tmp_path, session_id="s1", metadata={"subject": "M1"})
+    recorder = SessionRecorder(
+        tmp_path,
+        session_id="s1",
+        metadata=SessionMetadata(
+            experimenter="JS",
+            lab="Kreiter",
+            session_type="training",
+            subject=Subject(subject_id="M1", species="Macaca mulatta", weight_g=8400),
+        ),
+    )
     recorder.open(config={"rounds": 3}, seed=42)
     recorder.close()
 
-    manifest = json.loads((tmp_path / "s1" / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["session_id"] == "s1"
+    manifest = read_manifest(tmp_path / "s1")
+    assert manifest["format"] == "triald/session"
     assert manifest["seed"] == 42
-    assert manifest["metadata"] == {"subject": "M1"}
     assert manifest["config"] == {"rounds": 3}
+
+    meta = manifest["metadata"]
+    assert meta["session_id"] == "s1"
+    assert meta["experimenter"] == "JS"
+    assert meta["session_type"] == "training"
+    assert meta["subject"]["subject_id"] == "M1"
+    # Filled in without being asked for.
+    assert meta["started_at"] and meta["ended_at"]
+    assert meta["host"]
 
 
 def test_trials_are_written_as_they_finish(tmp_path: Path):

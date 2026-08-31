@@ -23,6 +23,13 @@ from triald.behaviour import (
     TrialParameters,
 )
 from triald.counters import ResultCount
+from triald.metadata import (
+    Device,
+    MetadataError,
+    SessionEvent,
+    SessionMetadata,
+    Subject,
+)
 from triald.outcomes import (
     AcceptancePolicy,
     FrameLoss,
@@ -31,7 +38,13 @@ from triald.outcomes import (
     TrialOutcome,
 )
 from triald.policy import DeclarativePolicy, Policy, PolicyError, load_policy
-from triald.recording import RecordingError, SessionRecorder, read_session
+from triald.recording import (
+    RecordingError,
+    SessionRecorder,
+    read_events,
+    read_manifest,
+    read_session,
+)
 from triald.selection import Ordering, TrialBag
 from triald.session import Session, SessionConfig, SessionError
 from triald.state import SessionState, SetProgress, TrialRecord, TrialSpec
@@ -48,8 +61,10 @@ __all__ = [
     "BehaviourSource",
     "BehaviourSourceError",
     "DeclarativePolicy",
+    "Device",
     "FrameLoss",
     "Manipulandum",
+    "MetadataError",
     "Ordering",
     "OutcomeReport",
     "Policy",
@@ -59,11 +74,14 @@ __all__ = [
     "Session",
     "SessionConfig",
     "SessionError",
+    "SessionEvent",
+    "SessionMetadata",
     "SessionRecorder",
     "SessionState",
     "SetProgress",
     "SimulatedBehaviourSource",
     "Staircase",
+    "Subject",
     "SwitchCriterion",
     "SwitchRule",
     "TrialBag",
@@ -76,5 +94,7 @@ __all__ = [
     "TrialTypeStore",
     "WeightedUpDown",
     "load_policy",
+    "read_events",
+    "read_manifest",
     "read_session",
 ]
