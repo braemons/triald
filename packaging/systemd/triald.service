@@ -1,0 +1,27 @@
+[Unit]
+Description=Trial control daemon for brain research
+Documentation=https://github.com/braemons/triald
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+ExecStart=/opt/braemons/triald/bin/triald serve --config /etc/braemons/triald.toml
+User=triald
+Group=triald
+Restart=on-failure
+RestartSec=2
+
+StateDirectory=triald
+StateDirectoryMode=0750
+
+# The daemon writes session records and reads policies; it has no business
+# anywhere else on the filesystem.
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+ReadWritePaths=/var/lib/triald
+
+[Install]
+WantedBy=multi-user.target

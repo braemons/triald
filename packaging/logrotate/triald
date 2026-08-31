@@ -1,0 +1,9 @@
+/var/log/triald/*.log {
+    weekly
+    rotate 8
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 triald triald
+}
