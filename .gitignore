@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+dist/
+build/
+
+# Tooling
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.ty_cache/
+
+# Packaging output
+/dist/
+/target/
+
+# Recorded sessions written during local runs
+/sessions/
