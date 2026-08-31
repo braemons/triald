@@ -26,7 +26,7 @@ built. **open** — needs a decision before it can be built.
    └──────────┘        result         └──────────────────┘
    budget: the ITI
         │
-        │  RPC · HTTP · live state
+        │  HTTP · WebSocket · live state
         ▼
    operators: web UI, Python client, analysis
 ```
@@ -145,8 +145,8 @@ environment* below.
 #### How a policy reaches the daemon — **planned**
 
 Today `load_policy()` takes a filesystem path on the machine running the daemon,
-which is all `triald sim` needs. Over RPC that is the wrong shape: the rig is not
-your laptop.
+which is all `triald sim` needs. Over the network that is the wrong shape: the
+rig is not your laptop.
 
 **The daemon receives the source text and owns it from then on.**
 
@@ -255,9 +255,36 @@ stack onto a headless rig box. `env install psychopy` for labs whose triald
 staircase has to match an existing PsychoPy experiment exactly; prefer the
 standalone `questplus`, or `triald.adaptive`, otherwise.
 
-### RPC surface — **planned**
+### API surface — **planned**
 
-ZMQ + protobuf, mirrored over WebSocket for the web UI, matching vstimd's shape.
+**One transport: HTTP for request/reply, WebSocket for the state stream, JSON
+throughout.** The web UI and all three clients use the identical API — there is
+no mirroring layer.
+
+This deliberately departs from vstimd, which speaks ZeroMQ and protobuf. Both of
+protobuf's real benefits fail to arrive here:
+
+- **wire efficiency** buys nothing against ~1 KB once per trial, with an
+  inter-trial interval to spend;
+- **one schema, many languages** does not survive contact with MATLAB, whose
+  protobuf support is poor enough that its client was already going over
+  HTTP/JSON — so the plan already had two wire formats before it had one client.
+
+What is left is a `buf`/`protoc` step in every client's build, and a protocol
+nobody can `curl`. For a tool people will poke at from MATLAB and a browser
+console at 11pm, readable-on-the-wire is worth more than compact.
+
+The same reasoning removes ZeroMQ: an HTTP round trip on a rig LAN costs about a
+millisecond, in a gap measured in hundreds. Carrying two transports and two
+encodings for one set of calls is twice the surface to build, test and keep in
+step, for latency triald never needed.
+
+vstimd's choice serves constraints triald does not have — a render loop and a
+budget measured in frames. Copying it because it is vstimd's would be
+cargo-culting. That leaves braemons with two daemons speaking different
+protocols, which is a genuine wart and is accepted knowingly; there is no shared
+client code between them to preserve. If binary and low-latency ever do matter,
+the models below can gain a protobuf mapping without the API changing shape.
 
 | Group | Calls |
 |---|---|
@@ -275,14 +302,35 @@ policy reaches the daemon*. `CheckPolicy` returns diagnostics with line numbers
 so the web editor can mark the offending line rather than printing a traceback
 underneath it.
 
-**The wire protocol is the contract, not the Python API.** Three clients are
-planned, so the protobuf schema is written first and every client is generated or
-hand-written against it — never against `triald.Session`.
+#### The schema survives; the compiler does not
+
+Dropping protobuf drops the encoding, not the contract. **The wire schema is the
+contract, not the Python API** — three clients are written against it, never
+against `triald.Session`.
+
+**Pydantic models → OpenAPI 3.1, which FastAPI emits for free → generated
+clients.** Python and C#/.NET have mature OpenAPI generators; MATLAB skips
+generation entirely and calls `webread`/`webwrite`. Schema evolution is by
+convention rather than field numbers: add fields, never repurpose a name.
+
+The models also consolidate three things that are separate today, which is worth
+as much as the API:
+
+| Today | With the models |
+|---|---|
+| hand-written `as_dict()` in `state.py` | serialisation for free |
+| config files parsed and validated by hand | validation with real messages, which matters for a file a scientist edits |
+| the JSONL record shape, defined implicitly by `as_dict()` | the same models, so the record and the wire cannot drift |
+
+This follows vstimd's own principle — *the config format is the runtime shape, no
+DTO* — rather than adding a parallel set of transfer objects beside the
+dataclasses. Converting `state.py` and the config types is a real refactor of
+working, tested code; it belongs with the API work, not before it.
 
 ### Web interface — **planned**
 
-Served by the daemon, no separate deployment, speaking the same protobuf over
-WebSocket rather than a second bespoke API.
+Served by the daemon, no separate deployment, over the same HTTP and WebSocket
+API the clients use rather than a second bespoke one.
 
 **Session view.** Current trial type, trial number, per-type counters, progress
 through the round and towards the switch rule, recent outcomes. The numbers VStim
@@ -362,23 +410,27 @@ Export to PNG and CSV, so a chart can go into a lab notebook.
 
 ### Clients — **planned**
 
-Three, against the protobuf schema rather than against each other.
+Three, against the OpenAPI schema rather than against each other. All three speak
+the same HTTP and JSON, so none of them needs a code generator to *work* —
+generation is a convenience for the typed ones, not a prerequisite.
 
 **Python** (`client/python`) — the reference client, mirroring vstimd's. LGPLv3
 rather than the daemon's AGPLv3, so importing it does not place an experiment's
 own code under copyleft — the same split vstimd uses, and for the same reason.
 
-**MATLAB** (`client/matlab`) — over **HTTP and JSON**, not protobuf. `webread`
-and `webwrite` are built in, need no toolbox, and avoid the MATLAB-to-Python
-version matching that makes the `py.` bridge painful in practice. The web API
-exists anyway, so this is nearly free. The `py.` bridge stays documented as an
-option for anyone wanting the full typed client.
+**MATLAB** (`client/matlab`) — a thin wrapper over `webread` and `webwrite`,
+which are built in and need no toolbox. This is the client that decided the
+protocol: MATLAB's protobuf support is poor enough that it was going over
+HTTP/JSON regardless, and a schema that one of three clients cannot use is not
+doing the job it was chosen for. The `py.` bridge stays documented for anyone
+wanting the typed Python client from MATLAB, with the caveat that it needs
+MATLAB and Python versions that agree.
 
 **Bonsai** (`client/bonsai`) — a `Bonsai.Triald` NuGet package exposing source
-and sink operators. Bonsai is reactive, so the mapping is unusually clean: the
-`Subscribe` state stream *is* an observable sequence, `NextTrial` is a source, and
-`ReportOutcome` is a sink. Transport over ZeroMQ via NetMQ, or WebSocket, matching
-whatever `Bonsai.ZeroMQ` already does well.
+and sink operators over `HttpClient` and `ClientWebSocket`, both in the .NET base
+library. Bonsai is reactive, so the mapping is unusually clean: the state stream
+*is* an observable sequence, `NextTrial` is a source, and `ReportOutcome` is a
+sink.
 
 Each client ships the same small example — arm a session, run trials, report
 outcomes — and CI runs it against the daemon, so the three cannot drift apart
@@ -454,10 +506,12 @@ imported by triald, avoids reimplementing the binary reader entirely.
 
 1. ~~Domain logic, policy API, simulator, tests~~ — **done**
 2. Session and rig config files, and the VStim importer
-3. **The protobuf schema.** First, and on its own: the RPC surface, the web UI
-   and all three clients are generated or written against it, so it is the one
-   thing that must not be discovered incrementally.
-4. RPC surface over ZMQ, plus policy upload and storage
+3. **The API schema.** First, and on its own — Pydantic models covering the
+   wire, the config files and the record shape. The API, the web UI and all
+   three clients are written against it, so it is the one thing that must not be
+   discovered incrementally. This is also where `state.py`'s hand-written
+   `as_dict()` methods go away.
+4. HTTP and WebSocket API, plus policy upload and storage
 5. Web interface — session view, then the CodeMirror editor, then the charts
 6. Python client, then MATLAB (HTTP/JSON), then Bonsai
 7. `SerialBehaviourSource` and reference firmware

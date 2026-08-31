@@ -83,13 +83,22 @@ Roughly in dependency order — nothing later is imported by anything earlier.
 | `runner.py` | Drives a session against a behaviour source |
 | `cli.py` | `triald sim`, `triald policy check`, `triald replay` |
 
-Not built yet: `rpc/` (ZMQ + protobuf), `web/` (FastAPI + WebSocket, with a
-CodeMirror policy editor and configurable uPlot performance charts), and
-`client/{python,matlab,bonsai}`. All specified in `dev/PLAN.md`.
+Not built yet: `api/` (FastAPI — HTTP for request/reply, WebSocket for the state
+stream, JSON throughout), `web/` (the browser UI, with a CodeMirror policy editor
+and configurable uPlot performance charts), and `client/{python,matlab,bonsai}`.
+All specified in `dev/PLAN.md`.
 
-**The protobuf schema comes before all of them.** Three clients plus the web UI
-are written against the wire format, not against `triald.Session`, so the schema
-is the contract and must not be discovered incrementally.
+**No protobuf and no ZeroMQ**, unlike vstimd. Its wire efficiency buys nothing
+against ~1 KB once per trial, and MATLAB's protobuf support is poor enough that
+one of the three clients was going over HTTP/JSON regardless — leaving a `protoc`
+step in every client build and a protocol nobody can `curl`. Two daemons speaking
+different protocols is a knowing trade, not an oversight.
+
+**The schema still comes before all of them.** Pydantic models covering the wire,
+the config files and the record shape, with OpenAPI generated from them. Three
+clients plus the web UI are written against that, never against
+`triald.Session`. It is also where `state.py`'s hand-written `as_dict()` methods
+go away.
 
 ## Testing
 
