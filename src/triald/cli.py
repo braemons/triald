@@ -9,6 +9,10 @@ Three things matter here and none of them is the daemon itself:
   caught before it is anywhere near an animal.
 * ``triald replay`` reruns a recorded session's outcomes through a different
   policy and shows which decisions changed.
+
+``triald serve`` is the fourth, and is the daemon: it brings up the HTTP and
+WebSocket API and the web UI that is written against it. It needs the ``serve``
+extra, which the rest of this module deliberately does not.
 """
 
 from __future__ import annotations
@@ -46,6 +50,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_policy(args)
     if args.command == "replay":
         return _cmd_replay(args)
+    if args.command == "serve":
+        return _cmd_serve(args)
 
     parser.print_help()
     return 2
@@ -84,6 +90,21 @@ def _build_parser() -> argparse.ArgumentParser:
     replay.add_argument("session", type=Path, help="recorded session directory")
     replay.add_argument("--policy", type=Path, help="policy to replay it through")
 
+    serve = sub.add_parser("serve", help="run the API and the web UI")
+    # Localhost by default, never 0.0.0.0. A policy is Python running in the
+    # daemon's process, so the API is remote code execution by design; exposing
+    # it should be a choice somebody makes, not a default they discover.
+    serve.add_argument("--host", default="127.0.0.1", help="bind address")
+    serve.add_argument("--port", type=int, default=8420)
+    serve.add_argument("--config", type=Path, help="session config JSON")
+    serve.add_argument("--policy", type=Path, help="policy .py to load at startup")
+    serve.add_argument(
+        "--results-dir",
+        type=Path,
+        help="write session records under here; without it nothing is recorded",
+    )
+    serve.add_argument("--policy-dir", type=Path, help="where uploaded policies are stored")
+
     return parser
 
 
@@ -91,7 +112,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _cmd_sim(args: argparse.Namespace) -> int:
-    store, config = _load_config(args.config) if args.config else _demo_experiment()
+    store, config = _load_config(args.config) if args.config else demo_experiment()
     if args.seed is not None:
         config.seed = args.seed
 
@@ -187,7 +208,7 @@ def _cmd_policy(args: argparse.Namespace) -> int:
         store, config = _ad_hoc_experiment(names)
         print(f"ok    checking against {len(names)} trial types")
     else:
-        store, config = _demo_experiment()
+        store, config = demo_experiment()
     session = Session(store, config, policy=policy)
     subject = SimulatedBehaviourSource(rng=random.Random(0))
 
@@ -232,10 +253,54 @@ def _cmd_replay(args: argparse.Namespace) -> int:
     return 2
 
 
+# -- serve -----------------------------------------------------------------------
+
+
+def _cmd_serve(args: argparse.Namespace) -> int:
+    """Bring up the daemon: the API, and the web UI written against it."""
+    try:
+        import uvicorn
+
+        from triald.api import SessionService, create_app
+    except ImportError:
+        print(
+            "error: 'triald serve' needs the serve extra - install it with\n"
+            "  uv sync --extra serve      (or: pip install 'triald[serve]')",
+            file=sys.stderr,
+        )
+        return 1
+
+    store, config = _load_config(args.config) if args.config else demo_experiment()
+
+    policy: Policy | None = None
+    if args.policy:
+        try:
+            policy = load_policy(args.policy)
+        except PolicyError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+
+    app = create_app(
+        SessionService(
+            store,
+            config,
+            policy=policy,
+            policy_dir=args.policy_dir,
+            results_dir=args.results_dir,
+        )
+    )
+    if args.results_dir is None:
+        print("note: no --results-dir, so nothing will be written to disk")
+
+    print(f"triald on http://{args.host}:{args.port}  (API docs at /docs)")
+    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+    return 0
+
+
 # -- a small experiment to try things against ------------------------------------
 
 
-def _demo_experiment() -> tuple[TrialTypeStore, SessionConfig]:
+def demo_experiment() -> tuple[TrialTypeStore, SessionConfig]:
     """A three-set training sequence that walks itself.
 
     fixation -> one_line -> one_half_cyc, each handing over after enough hits.

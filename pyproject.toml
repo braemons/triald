@@ -39,6 +39,10 @@ dev = [
     "pytest-cov>=6.0",
     "ruff>=0.8",
     "ty>=0.0.1a1",
+    # The API tests drive the app through FastAPI's TestClient, which is httpx.
+    # The `serve` extra has to be installed for them to run at all; without it
+    # tests/test_api.py skips itself.
+    "httpx>=0.28",
 ]
 
 [build-system]
