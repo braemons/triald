@@ -908,10 +908,9 @@ closed on watchdog timeout, reset, or link loss.
 
 **The firmware never learns the trial type.** It receives channels, windows and a
 reward duration, which is what keeps it stable while paradigms change. For a
-two-port lick task that means `correct_response` as a *list* of channels rather
-than the current scalar: `[]` for no response required, `[0]` for the left port,
-and `[0, 1]` for either — which is how shaping starts, and is not expressible
-today.
+two-port lick task that means `correct_response` as a *list* of channels: `[]`
+for no response required, `[0]` for the left port, and `[0, 1]` for either —
+which is how shaping starts.
 
 #### What this leaves `behaviour.py` as
 
@@ -986,11 +985,16 @@ follow that a bare index cannot give:
   type pointing at it silently changes meaning. Sets were cured by naming them;
   time sequences want the same cure.
 
-`TrialParameters.response_window_ms` is the placeholder for all of this — one
-scalar standing in for a twenty-interval machine. For a two-port lick task
-`correct_response` also has to become a *list* of channels: `[]` for no response,
-`[0]` for the left port, `[0, 1]` for either — which is how shaping starts and is
-not expressible today.
+There is no placeholder for this in the code, deliberately. `TrialParameters`
+briefly carried a response channel and a response window, filled in by the runner
+from the trial type *index* — right by accident for a two-condition set and wrong
+for every other one. Those fields were never read, and a wrong answer nobody
+consumes is worse than no answer, so they are gone: what an executor is
+configured with is the executor's business until this table exists.
+
+When it does, a two-port lick task needs `correct_response` as a *list* of
+channels — `[]` for no response, `[0]` for the left port, `[0, 1]` for either,
+which is how shaping starts.
 
 **triald rolls the random durations.** `m_RandInterval_ms` and
 `m_MaxNoRandIntervals` are rolled at runtime by

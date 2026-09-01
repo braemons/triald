@@ -22,7 +22,6 @@ serve = [
     "uvicorn[standard]>=0.32",
     "pydantic>=2.9",
 ]
-serial = ["pyserial>=3.5"]
 
 # Adaptive procedures beyond the up/down family in triald.adaptive. Never a hard
 # dependency: PsychoPy drags a GUI stack onto a headless rig box. On a rig these

@@ -3,26 +3,24 @@
 The daemon decides what runs; something else watches the animal and says what
 happened. :class:`BehaviourSource` is that seam, and it exists so a simulated
 session exercises the *real* trial loop rather than a parallel one written for
-testing. :func:`triald.runner.run_trial` is the only caller, and ``triald sim``,
+testing. :func:`triald.runner.run_trial` is its only caller, and ``triald sim``,
 the web UI's debug stepper and the tests all go through it.
 
 **On a real rig this is not the microcontroller link.** An earlier plan had
 triald holding a serial connection to the behaviour controller; it no longer
-does. The microcontroller is a participant on the rig's trigger bus, armed by the
-experiment controller, and a finished trial reaches triald as one report over the
-API. See dev/PLAN.md, *The microcontroller*. The interface below is therefore the
-simulator's, plus a description of the handshake any executor owes - which is
-where :class:`TrialParameters` earns its keep as documentation of the contract.
+does. The microcontroller is a participant on the rig's trigger bus - it arms on
+the edges the stimulators raise, names the outcome, and reports the finished
+trial to triald over the API. Nothing here describes that protocol, because it is
+the rig's to define and not triald's. See dev/PLAN.md, *The shape of the rig*.
 
 **The division of authority is unchanged.** Whoever executes the trial is the
 timing authority: it debounces the inputs, timestamps responses in its own clock,
 and drives the reward. triald is the decision authority: it chooses the trial
 type, decides whether the outcome was *accepted*, and records what happened.
 
-Note what is *not* sent: the trial type. An executor receives a
-:class:`TrialParameters` block - which response is correct, how long the windows
-are, how much reward - and never learns what condition it is running. That is
-what keeps firmware stable while paradigms change.
+Note what is *not* sent: the trial type. An executor is configured from it
+elsewhere and never learns which condition it is running, which is what keeps
+firmware stable while paradigms change.
 """
 
 from __future__ import annotations
@@ -37,37 +35,32 @@ from triald.state import TrialSpec
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class TrialParameters:
-    """What the behaviour source needs in order to run one trial.
+    """What a behaviour source is told before a trial runs.
 
-    Deliberately semantic-free. ``correct_response`` is a channel number, not a
-    condition name, because the microcontroller should not have to be reflashed
-    when a paradigm gains a condition.
+    Two fields, because two are what a source actually needs from triald. It
+    once carried a response channel, a response window, a hold time, a timeout
+    and a start-signal flag - the shape of a serial protocol to a
+    microcontroller. triald no longer owns that link, nothing ever read those
+    fields, and inventing values for them in the runner was worse than not
+    having them: `correct_response` was filled in from the trial type *index*,
+    which is right only by accident for a two-condition set and wrong for every
+    other one.
+
+    What an executor needs in order to run a trial is the executor's
+    configuration, and on a real rig it is configured from the trial type
+    directly. See dev/PLAN.md, *The interval table, decomposed*.
     """
 
     trial_id: int
-    """Monotonic within the session. The whole correctness story - see
-    :meth:`BehaviourSource.arm`."""
+    """Monotonic within the session, and the whole correctness story.
 
-    correct_response: int
-    """Which input channel counts as correct. -1 when no response is required."""
-
-    response_window_ms: int
-    """How long a response is accepted for, from the trigger edge."""
-
-    hold_time_ms: int = 0
-    """How long a manipulandum must be held before the window opens."""
-
-    timeout_ms: int = 10_000
-    """Abort the trial if nothing has happened by then."""
+    A result for any other trial is refused rather than accepted - this is what
+    stops a late outcome being attributed to the trial after it, which is how a
+    rig quietly mislabels a dataset.
+    """
 
     reward_ms: int = 0
-    """Valve open time on a correct response."""
-
-    require_start_signal: bool = False
-    """Whether the trial waits for the subject to signal readiness."""
-
-    def as_dict(self) -> dict[str, object]:
-        return dataclasses.asdict(self)
+    """What a correct response is worth, so the source can report what it gave."""
 
 
 class BehaviourSourceError(Exception):
@@ -75,37 +68,35 @@ class BehaviourSourceError(Exception):
 
 
 class BehaviourSource(abc.ABC):
-    """Runs one trial and says how it ended."""
+    """Runs one trial and says how it ended.
+
+    The seam that keeps a simulated session on the *real* trial loop:
+    :func:`triald.runner.run_trial` is written against this, so ``triald sim``,
+    the web UI's debug stepper and the tests exercise the same four calls rather
+    than a loop written for testing.
+    """
 
     @abc.abstractmethod
-    def arm(self, params: TrialParameters, timeout_s: float = 1.0) -> None:
-        """Load `params` and confirm they were received.
+    def arm(self, params: TrialParameters) -> None:
+        """Prepare for the trial `params` describes.
 
-        Must not return until the source has acknowledged the exact
-        ``trial_id``. **No trial may start that the source was not confirmed
-        configured for** - this is the microcontroller equivalent of
-        ``StartPermittable()``, and skipping it is how a session ends up running
-        the previous trial's parameters without anybody noticing.
+        Must not return until the source is ready for that exact ``trial_id``.
+        **No trial may start that the source was not confirmed configured for**
+        - the local form of ``StartPermittable()``, and skipping it is how a
+        session ends up running the previous trial's parameters without anybody
+        noticing.
 
         Raises:
-            BehaviourSourceError: if the acknowledgement does not arrive, or is
-                for a different trial.
+            BehaviourSourceError: if it cannot be armed for that trial.
         """
 
     @abc.abstractmethod
-    def result(self, trial_id: int, timeout_s: float = 60.0) -> OutcomeReport:
-        """Wait for the outcome of the trial with `trial_id`.
-
-        The ``trial_id`` check is what stops a late result being attributed to
-        the trial after it - the classic way a rig quietly mislabels a dataset.
-        A result for any other trial is refused rather than accepted.
+    def result(self, trial_id: int) -> OutcomeReport:
+        """Give the outcome of the trial with `trial_id`.
 
         Raises:
-            BehaviourSourceError: on timeout, or on a result for another trial.
+            BehaviourSourceError: on a result for any other trial.
         """
-
-    def close(self) -> None:  # noqa: B027 - optional hook, not every source holds anything
-        """Release whatever the source holds. Must be safe to call twice."""
 
 
 class SimulatedBehaviourSource(BehaviourSource):
@@ -150,10 +141,10 @@ class SimulatedBehaviourSource(BehaviourSource):
         """
         self._spec = spec
 
-    def arm(self, params: TrialParameters, timeout_s: float = 1.0) -> None:
+    def arm(self, params: TrialParameters) -> None:
         self._armed = params
 
-    def result(self, trial_id: int, timeout_s: float = 60.0) -> OutcomeReport:
+    def result(self, trial_id: int) -> OutcomeReport:
         if self._armed is None or self._armed.trial_id != trial_id:
             armed = None if self._armed is None else self._armed.trial_id
             raise BehaviourSourceError(

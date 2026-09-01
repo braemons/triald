@@ -89,10 +89,10 @@ reaching for anything else.
 - **Counters are banked per set** when trial type numbers are extended, shared
   when they are not. Banking rather than clearing on load is what stops a session
   that alternates between two sets losing a set's counts each time it returns.
-- **An executor never learns the trial type.** It gets a `TrialParameters`
-  block — correct channel, windows, reward — so firmware stays stable while
-  paradigms change. Whoever executes a trial is the *timing* authority; triald is
-  the *decision* authority, and decides only whether the outcome was accepted.
+- **An executor never learns the trial type.** It is configured from it — correct
+  channel, windows, reward — so firmware stays stable while paradigms change.
+  Whoever executes a trial is the *timing* authority; triald is the *decision*
+  authority, and decides only whether the outcome was accepted.
 - **triald holds no hardware link, and there is no central state machine.**
   vstimd's armed animations chain inside the server; the microcontroller names the
   outcome; they agree through trigger edges. triald configures both from the trial
