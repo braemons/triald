@@ -6,12 +6,18 @@ A scriptable trial control daemon: it decides what trial runs next, records what
 happened, and lets an experimenter write the decision in Python. Sibling of
 [vstimd](https://github.com/braemons/vstimd).
 
-**The split with vstimd is the design.** vstimd owns everything with a frame
-deadline — the render loop, VTLs, the DAQ. triald decides and remembers, in the
-gap between trials. *Nothing in triald's loop may become timing-critical* — that
-is the assumption the whole language choice rests on. If something here starts
-needing sub-millisecond timing, it belongs in vstimd or in the microcontroller,
-not here.
+**The split with vstimd is the design.** The rig is an hourglass with the virtual
+trigger lines at its waist: below them the things that *do* something on a
+trigger (render, sound, valves, TTL bridging), above it the thing that decides
+what a trial *is*. There is no central state machine between them: vstimd's armed
+animations chain inside the server, the microcontroller names the outcome, and
+they agree through trigger edges. triald sits on the slow bus and decides and
+remembers in the gap between trials.
+
+*Nothing in triald's loop may become timing-critical* — that is the assumption
+the whole language choice rests on. If something here starts needing
+sub-millisecond timing, it belongs below the waist: in an armed animation, in a
+stimulator, or in the microcontroller. Never here.
 
 The logic is ported from VStim's `TrialTypeManager` (1,961 lines). See
 `dev/PLAN.md` for what came over, what is new, and what is deliberately out.
@@ -27,7 +33,15 @@ uv run ty check
 uv run triald sim --trials 200            # whole session, simulated subject
 uv run triald sim --trials 200 --trace    # every trial
 uv run triald policy check my_policy.py   # import + smoke run
+
+uv sync --group dev --extra serve         # the daemon needs the serve extra
+uv run triald serve                       # API + web UI on 127.0.0.1:8420
 ```
+
+`triald serve` puts the same simulator behind a web UI whose debug panel steps
+it, free-runs it, or drives one trial by hand. Everything it does goes through
+the API in `dev/API.md`; nothing reaches into `triald.Session` by a private
+route.
 
 `triald sim` is the fastest feedback loop in the repo — a session of 500 trials
 runs in well under a second, with no hardware and no vstimd. Use it before
@@ -50,6 +64,14 @@ reaching for anything else.
 - **`.tdr` outcome codes are a wire contract.** `TrialOutcome`'s numeric values
   are in every `.tdr` file the lab has written and every analysis script that
   reads one. Never renumber them.
+- **Five orderings, and only one puts the token back.** Four draw *without*
+  replacement from a per-type remaining count, so a round is balanced by
+  construction; `random_with_replacement` draws on the configured weights and is
+  balanced only in expectation. Its round is still `trials_per_round` accepted
+  trials long, or rounds and the stop rules would mean nothing — so per-type
+  `remaining` becomes the quota still owed, and `TrialBag.total_remaining` is
+  the authority for the round. `ascending`/`descending` ignore `avoid_repeat`: a
+  deterministic ordering has nothing to avoid a repeat with.
 - **Seeded RNG, recorded with the session.** VStim uses `rand() % n` — biased and
   unreproducible. Replay depends on this being an explicit `random.Random`.
 - **`>=`, not `==`, for stop conditions.** VStim compares `nDone ==
@@ -67,10 +89,16 @@ reaching for anything else.
 - **Counters are banked per set** when trial type numbers are extended, shared
   when they are not. Banking rather than clearing on load is what stops a session
   that alternates between two sets losing a set's counts each time it returns.
-- **The microcontroller never learns the trial type.** It gets a
-  `TrialParameters` block — correct channel, windows, reward — so firmware stays
-  stable while paradigms change. It is the *timing* authority; triald is the
-  *decision* authority.
+- **An executor never learns the trial type.** It gets a `TrialParameters`
+  block — correct channel, windows, reward — so firmware stays stable while
+  paradigms change. Whoever executes a trial is the *timing* authority; triald is
+  the *decision* authority, and decides only whether the outcome was accepted.
+- **triald holds no hardware link, and there is no central state machine.**
+  vstimd's armed animations chain inside the server; the microcontroller names the
+  outcome; they agree through trigger edges. triald configures both from the trial
+  type and hears the result. `BehaviourSource` is what keeps `triald sim` and the
+  debug stepper on the real loop, not a serial abstraction. See dev/PLAN.md, *The
+  shape of the rig*.
 - **`trial_id` on every behaviour-source message.** It is what stops a late
   result being attributed to the next trial, which is how a rig quietly
   mislabels a dataset.
@@ -79,6 +107,18 @@ reaching for anything else.
   shows both what was believed and when it changed. Custom payloads are checked
   strictly (no `default=str`): stringifying a `set` into `"{1, 2, 3}"` is silent
   corruption of something nobody re-checks for years.
+- **The wire schema is the contract, not the Python API.** `api/schemas.py` is
+  what the UI and the clients are written against. A `TrialRecordModel`
+  serialises byte-for-byte to the `trials.jsonl` line, and a test asserts it, so
+  the record format and the API cannot drift. That is why the timestamp fields
+  carry a serialiser: pydantic spells UTC `Z` and `datetime.isoformat()` spells
+  it `+00:00`, and the record has years of files behind it.
+- **The web UI has no build step, no framework and no CDN.** A rig box may have
+  no route to the internet. Three files in `web/`, served by the daemon.
+- **The debug controls are not a second code path.** `/api/debug/step` goes
+  through `runner.run_trial`, the same four calls a rig makes, with
+  `SimulatedBehaviourSource` in place of the microcontroller. A simulator that
+  had its own loop would stop testing the real one.
 - **Custom metadata is never interpreted.** `SessionMetadata.extra`,
   `Device.info`, `SessionEvent.data` and `TrialType.params` are stored and
   returned verbatim. triald has no business knowing what an electrode depth is.
@@ -92,21 +132,28 @@ Roughly in dependency order — nothing later is imported by anything earlier.
 | `outcomes.py` | The 11-code taxonomy, its modifiers, and `AcceptancePolicy` |
 | `trialtypes.py` | `TrialType`, `TrialTypeSet`, `SwitchRule`, the store, chain validation |
 | `counters.py` | `ResultCount` — per type and total |
-| `selection.py` | `TrialBag`: the three orderings, draw-without-replacement, avoid-repeat |
+| `selection.py` | `TrialBag`: the five orderings, draw-without-replacement, avoid-repeat, `P(next)` |
 | `state.py` | `TrialSpec`, `TrialRecord`, `SessionState` — everything published, all frozen |
 | `policy.py` | The `Policy` base class, `safe_call`, `load_policy` |
 | `adaptive.py` | Up/down staircases (no dependencies; PsychoPy is optional and external) |
-| `behaviour.py` | `BehaviourSource`: the microcontroller seam, and the simulated subject |
+| `behaviour.py` | `BehaviourSource`: the simulator seam, and the synthetic subject |
 | `session.py` | The trial loop — the state machine everything hangs off |
 | `metadata.py` | `SessionMetadata`, `Subject`, `Device`, `SessionEvent` — NWB-aligned names |
 | `recording.py` | The session directory: manifest, trials, events, summary |
 | `runner.py` | Drives a session against a behaviour source |
-| `cli.py` | `triald sim`, `triald policy check`, `triald replay` |
+| `cli.py` | `triald sim`, `triald policy check`, `triald replay`, `triald serve` |
+| `api/schemas.py` | The wire contract: Pydantic models for everything crossing the API |
+| `api/service.py` | One rig's session — the rules about *when* something may be done |
+| `api/app.py` | FastAPI routes, deliberately thin, plus the static UI mount |
+| `web/` | The session view: `index.html`, `app.js`, `style.css`. No build step |
 
-Not built yet: `api/` (FastAPI — HTTP for request/reply, WebSocket for the state
-stream, JSON throughout), `web/` (the browser UI, with a CodeMirror policy editor
-and configurable uPlot performance charts), and `client/{python,matlab,bonsai}`.
-All specified in `dev/PLAN.md`.
+`api/` and `web/` need the `serve` extra; everything above them imports nothing
+at all, which is why they are a subpackage rather than mixed in. The API is
+specified in `dev/API.md`.
+
+Not built yet: `client/{python,matlab,bonsai}`, the `Environment` and `Records`
+API groups, the CodeMirror policy editor and the configurable uPlot performance
+charts. All specified in `dev/PLAN.md`.
 
 **No protobuf and no ZeroMQ**, unlike vstimd. Its wire efficiency buys nothing
 against ~1 KB once per trial, and MATLAB's protobuf support is poor enough that
@@ -114,11 +161,12 @@ one of the three clients was going over HTTP/JSON regardless — leaving a `prot
 step in every client build and a protocol nobody can `curl`. Two daemons speaking
 different protocols is a knowing trade, not an oversight.
 
-**The schema still comes before all of them.** Pydantic models covering the wire,
-the config files and the record shape, with OpenAPI generated from them. Three
-clients plus the web UI are written against that, never against
-`triald.Session`. It is also where `state.py`'s hand-written `as_dict()` methods
-go away.
+**The schema comes before the clients.** `api/schemas.py` covers the wire and the
+record shape, with OpenAPI generated from it. The clients and the web UI are
+written against that, never against `triald.Session`. Still outstanding: the
+config-file shapes, and retiring `state.py`'s hand-written `as_dict()` methods in
+favour of the models — a real refactor of working, tested code, and the drift
+test is what holds the two together until it happens.
 
 ## Testing
 

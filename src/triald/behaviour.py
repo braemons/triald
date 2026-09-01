@@ -1,18 +1,25 @@
-"""Where outcomes come from: the microcontroller, or a simulated subject.
+"""Where outcomes come from: a simulated subject, or whatever the rig reports.
 
 The daemon decides what runs; something else watches the animal and says what
-happened. That something is a :class:`BehaviourSource` - in a real rig a
-microcontroller on the end of a serial link, in ``triald sim`` a synthetic
-subject. Both satisfy the same interface, so a simulated session exercises the
-real code path rather than a parallel one built for testing.
+happened. :class:`BehaviourSource` is that seam, and it exists so a simulated
+session exercises the *real* trial loop rather than a parallel one written for
+testing. :func:`triald.runner.run_trial` is the only caller, and ``triald sim``,
+the web UI's debug stepper and the tests all go through it.
 
-**The division of authority.** The microcontroller is the timing authority: it
-debounces the levers, timestamps responses in its own microsecond clock, and
-drives the reward valve. triald is the decision authority: it chooses the trial
-type and records what happened. Neither does the other's job, and the interface
-below is the whole of what passes between them.
+**On a real rig this is not the microcontroller link.** An earlier plan had
+triald holding a serial connection to the behaviour controller; it no longer
+does. The microcontroller is a participant on the rig's trigger bus, armed by the
+experiment controller, and a finished trial reaches triald as one report over the
+API. See dev/PLAN.md, *The microcontroller*. The interface below is therefore the
+simulator's, plus a description of the handshake any executor owes - which is
+where :class:`TrialParameters` earns its keep as documentation of the contract.
 
-Note what is *not* sent: the trial type. The microcontroller receives a
+**The division of authority is unchanged.** Whoever executes the trial is the
+timing authority: it debounces the inputs, timestamps responses in its own clock,
+and drives the reward. triald is the decision authority: it chooses the trial
+type, decides whether the outcome was *accepted*, and records what happened.
+
+Note what is *not* sent: the trial type. An executor receives a
 :class:`TrialParameters` block - which response is correct, how long the windows
 are, how much reward - and never learns what condition it is running. That is
 what keeps firmware stable while paradigms change.

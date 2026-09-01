@@ -11,29 +11,264 @@ built. **open** — needs a decision before it can be built.
 
 ---
 
-## Where triald sits
+## The shape of the rig
+
+The goal is everything VStim does, taken apart along the seams it already has:
+**you can visually stimulate without running a trial, without a state machine and
+without any response request.** Nothing is tied to a particular piece of
+hardware, and a new kind of stimulator is an addition rather than an edit.
+
+VStim is already modular — `TrialTypeManagerInterface`, `ExperimentControllerInterface`,
+`DigIoInterface`, `EyeMonInterface`, `ObjectQueueInterface` are all there. What it
+lacks is *separability*: those modules share one recursive mutex, pull from each
+other synchronously, and hold raw pointers to one another, so no subset of them
+can run alone. The work is making the existing boundaries real, not drawing new
+ones.
+
+### An hourglass on the trigger bus
 
 ```
-                    arm next trial
-   ┌──────────┐  ──────────────────▶  ┌──────────────────┐
-   │  triald  │                       │      vstimd      │  budget: one frame
-   │          │  ◀──────────────────  │  scene, VTLs     │
-   │ types    │        outcome        └──────────────────┘
-   │ policy   │
-   │ counters │  ──────────────────▶  ┌──────────────────┐
-   │ records  │   trial parameters    │  microcontroller │  budget: microseconds
-   │          │  ◀──────────────────  │  levers, valve   │
-   └──────────┘        result         └──────────────────┘
-   budget: the ITI
-        │
-        │  HTTP · WebSocket · live state
-        ▼
-   operators: web UI, Python client, analysis
+   decide WHAT and WHEN                          slow bus · HTTP+JSON · per trial
+  ┌────────────────────────────────────────────────────────┐
+  │ triald    trial types · sets · counters · policy       │  optional
+  │           stop rules · acceptance · the record         │
+  └────────────────────────────────────────────────────────┘
+        │  configure(trial_id, trial_type) → ready → start
+        │  contribute(trial_id, …) · result(trial_id, outcome)
+  ═══════════════ virtual trigger lines ═══════════════════   fast bus · shm
+  ┌─────────┬─────────┬─────────┬──────────┬───────────────┐
+  │ vstimd  │ soundd  │ optod   │  daqd    │      MCU      │  each optional
+  │ scene · │ audio   │ laser   │ TTL ⇄ VTL│ response ·    │
+  │ armed   │         │         │          │ outcome ·     │
+  │ anims   │         │         │          │ reward        │
+  └─────────┴─────────┴─────────┴──────────┴───────────────┘
+   do WHAT, coupled to each other by edges
 ```
 
-The split is the reason triald can be Python. vstimd keeps everything with a
-frame deadline; the microcontroller keeps everything needing microsecond
-timestamps; triald decides and remembers, in the gap between trials.
+**The virtual trigger line is the waist.** Everything above it decides what a
+trial *is*; everything below it does something when an edge arrives. A VTL is a
+VTL whether it was raised by a GPIO edge, by an armed animation finishing, by the
+microcontroller, or by a person clicking a button — which is what "not tied to
+hardware" means in practice. daqd is not privileged: it is the module that
+bridges real TTL lines to virtual ones, and a rig with no TTL hardware simply
+does not run it.
+
+### There is no central state machine
+
+The most important thing about this picture is what is *not* in it. VStim needs a
+central `ExpCtrl` because it is one process with one thread: somebody has to own
+the sequence position. Spread across participants coupled by trigger lines, that
+central executor **dissolves**.
+
+vstimd already does the half that is visual. Its animations arm on an input line,
+run for an exact number of frames, pulse output lines, and **chain each other
+entirely inside the server** through VTL output edges — polled at frame start,
+committed at vblank, with no network round trip. A visual timeline is expressible
+today with nothing above it.
+
+What the animation vocabulary cannot do is name an **outcome**. Nothing in
+*flash · couple · move · flicker* with start/final/cancel actions can say that
+timing out here means `LATE` and timing out there means `NOT_STARTED`. That is
+the half the microcontroller takes: response windows, correct channels, timeouts,
+reward, and the outcome to name when nothing happens.
+
+The two halves agree through **edges** — vstimd pulses stimulus onset, the MCU
+opens its response window on that edge — which is the same mechanism that already
+makes reaction times correct with no clock synchronisation anywhere.
+
+So: **the lines are the state machine.** `Interval`'s branch table
+(`m_virtualTriggerNextStateMappings`) does not move to a new home; it decomposes
+into per-participant armed behaviour plus a coupling contract.
+
+### Lifetimes, not just layers
+
+The lower a module sits, the longer it lives. This is the part that is easy to
+get wrong by thinking of the stack as a call graph.
+
+| Module | Lifetime | Between trials | With no session at all |
+|---|---|---|---|
+| vstimd · soundd · optod · daqd · MCU | the rig — **always on** | still rendering, still bridging lines | still running |
+| triald | one session | deciding the next trial | not needed |
+
+**Always-on visual stimulation is a requirement, not a side effect.** It has
+already proved its worth: you need a stimulus on the screen to align the animal,
+check the display, measure luminance or debug a scene, with no experiment running
+anywhere and nothing to arm. A renderer that only exists inside a trial cannot do
+any of that.
+
+So `configure` is a **borrow, not a boot**. vstimd always has a scene — a
+background, a fixation point, whatever was last set. A trial says "for trial 42,
+present this one" and hands it back afterwards. The readiness gate asks *are you
+configured for trial 42*, never *are you alive*, which is why it can answer in
+microseconds.
+
+### Two channels, and why every module needs both
+
+A participant needs to know *what* to do as well as *when*. Those are different
+questions with different budgets, and keeping them apart is what makes the layers
+separable.
+
+| | Configure | Trigger |
+|---|---|---|
+| Carries | what this module does on trial *n* | now |
+| Rate | once per trial | per event, per frame |
+| Bus | slow | fast |
+| Source | triald, or set by hand | a VTL edge |
+
+A module that never varies per trial needs only the trigger channel. A module
+being driven by hand for a demo needs only the configure channel plus somebody to
+raise a line. Neither case requires anything above it to exist.
+
+### Run any subset
+
+This is the test of whether the decomposition is real:
+
+| Running | Gets you |
+|---|---|
+| vstimd alone | a stimulus you trigger by raising a VTL by hand — alignment, display checks, luminance |
+| vstimd + daqd | armed animations firing on real TTL pulses. No trial, no outcome, no response |
+| + MCU | a paradigm: response windows, reward, an outcome — one condition, forever |
+| + triald | conditions, weights, counters, blocks, switching, acceptance, the session record |
+| soundd + optod + daqd + MCU | a screenless optogenetics rig, no renderer anywhere |
+
+### Every module is scriptable on its own
+
+For plenty of work the right answer is **a Python script that drives visual
+stimulation and nothing else** — a psychophysics experiment, a demo, a teaching
+exercise, an alignment routine. That has to be a first-class way to use the rig,
+not a degraded mode you reach by disabling things.
+
+So every module carries its own control API on the slow bus. triald is not
+privileged here; it is simply the module that happens to know about trial types.
+A script talking to vstimd is just another configure-channel client, and somebody
+using the rig that way never has to learn that triald exists.
+
+The honest limit is timing, and it produces a gradient rather than a cliff:
+
+| How you drive it | Timing | Good for |
+|---|---|---|
+| script → vstimd, call by call | ~1 ms jitter, slow bus | demos, alignment, psychophysics at second scale |
+| script → vstimd, arming animations on lines | frame-accurate, executed on the device | anything where onset matters |
+| + MCU with an outcome table | frame-accurate, with responses and branching | a paradigm |
+| + triald | all of the above, plus conditions, counters, blocks, the record | an experiment |
+
+Nothing outside the render loop can be frame-accurate, so the second row is the
+important one: a script that needs precise onsets *arms* behaviour and lets the
+device execute it, rather than driving it a call at a time.
+
+### Extending it
+
+A new stimulator — an olfactometer, a laser, a tactile probe — implements four
+things and **nothing above it changes**:
+
+1. subscribe to the trigger bus, and act on an edge;
+2. optionally raise VTLs of its own (onset, fault, done);
+3. optionally accept `configure(trial_id, trial_type)` and answer `ready(trial_id)`,
+   if what it does varies by trial;
+4. register itself, so it joins the readiness gate and appears in the session
+   record with its version and its own free-form `info`.
+
+Steps 3 and 4 are the only ones triald knows about, and both are generic: triald
+learns that a participant exists, never what an odour is. That is the same
+promise `TrialType.params`, `Device.info` and `SessionEvent.data` already make —
+stored, returned, never interpreted.
+
+If adding a stimulator ever requires a change in triald, the boundary is in the
+wrong place.
+
+### One process or several is a deployment choice
+
+**The module boundaries are the deliverable; the process boundaries are
+packaging.** Get the two channels right and the same code runs as one native
+binary hosting modules over an in-process bus, or as separate daemons over shared
+memory, without the modules knowing which.
+
+Two things are settled, and one deliberately is not:
+
+- **triald is its own process.** It is Python, it is on the slow bus, and it has
+  no timing budget. That is not up for revisiting.
+- **The fast tier must be co-located**, whatever the process count. A tone, a
+  laser pulse and a frame that have to land within a millisecond of each other
+  need one clock and one machine. Shared memory reaches across processes on a
+  box; nothing reaches across boxes at that precision.
+- **How many native processes the fast tier is** stays open. The bus contract is
+  what lets that decision be made late, and changed.
+
+The honest risk of many processes is not latency — shared memory settles that —
+but operational surface: N units, N configs, N logs, and explicit CPU affinity
+and priorities, or the real-time modules preempt each other. That cost is real
+and is the reason not to split further than the seams require.
+
+### Where the modules come from
+
+Every module is a VStim class, and most of the calls between them already exist
+as virtual methods. That is the check on whether a boundary is in the right
+place: **a cross-module call should already be a virtual in a VStim
+`*Interface.h`** — and if it has no counterpart, either it is genuinely new or
+the seam is wrong.
+
+| Module | VStim | Interface already there |
+|---|---|---|
+| triald | `TrialTypeManager` | `TrialTypeManagerInterface` |
+| vstimd | rendering, object queue, and now the visual half of `ExpCtrl` | `ObjectQueueInterface` |
+| daqd | `DigIO` | `DigIoInterface` |
+| MCU | the outcome half of `ExpCtrl` · `Interval` · `Valve` | `ExperimentControllerInterface` |
+| eye | `EyeMon` | `EyeMonInterface` |
+
+`ExpCtrl` is the one class that does not survive as a unit — see *The interval
+table, decomposed*.
+
+Two calls have to invert, both because a process boundary cannot be crossed
+synchronously for free:
+
+- **`GetNextTrialType()`** is pulled by the controller at `ExpCtrl.cpp:175`.
+  It becomes a push — see *Who initiates a trial* under Open questions.
+- **`WriteTrialResultsToTdr(eyeMon, commonResources, objectQueue)`** has the trial
+  type manager reaching into the eye monitor and the object queue at trial end.
+  It becomes contribution rather than collection — see *Contributions, not one
+  report*.
+
+### The trial, end to end
+
+```
+triald    decide the type · switch the set if due · check the stop rules
+   │      roll this trial's random interval durations, into the record
+   │      configure(trial_id, trial_type)  ──▶  every registered participant
+   │      ready(trial_id)                  ◀──  all of them, or it does not start
+   │      start(trial_id)                  ──▶  the participant that opens the trial
+  ─── the fast bus, coupled by edges ──────────────────────────────────
+          vstimd  armed animations run the visual timeline, pulse onset
+          MCU     opens its window on that edge · reads the response ·
+                  drives the valve · names the outcome
+          daqd    bridges the real lines both ways
+  ─── back on the slow bus ─────────────────────────────────────────────
+   │      contribute(trial_id, …)          ◀──  vstimd: frame loss
+   │                                       ◀──  eye: precise fixation
+   │      result(trial_id, outcome, …)     ◀──  MCU
+triald    count · accepted? · advance the round · switch · record · publish
+```
+
+The fan-out overlaps the previous trial's inter-trial interval, so the slow-bus
+round trips hide inside it. That is what makes push affordable — and it is also
+the hazard: a participant can be told about trial *n+1* while another is still
+finishing *n*. **Configuration is staged and swapped at the start edge**, never
+applied on receipt. VStim already has the shape, latching `m_RecordingTrial`
+inside `GetNextTrialType()`; here the latch moves to the participant.
+
+Note which facts travel on which bus. **The fast bus carries what must be
+*timed*; the slow bus carries what must be *recorded*.** Frame loss and precise
+fixation are recorded facts that also happen to veto acceptance — and acceptance
+is decided in triald, at leisure, after the trial. Neither needs to reach anybody
+within a frame.
+
+Two invariants carry the correctness across every participant, and they are the
+same two the microcontroller link already has:
+
+- **`trial_id` on every message** — configure, ready, contribution, result. A
+  late or missed message cannot be attributed to the wrong trial.
+- **No trial starts that every participant was not confirmed configured for.**
+  `StartPermittable()`, distributed. A refusal is a recorded event, not a log
+  line.
 
 ## The trial loop
 
@@ -92,9 +327,35 @@ procedure has somewhere to put its level.
 
 ### Selection and ordering — **done**
 
-Three orderings (`random_in_round`, `random_in_experiment`, `ascending`),
-draw-without-replacement from a per-type remaining count, avoid-repeat, refill at
-the end of a round or experiment.
+Five orderings, draw-without-replacement from a per-type remaining count,
+avoid-repeat, refill at the end of a round or experiment.
+
+| Ordering | The bag holds | The draw |
+|---|---|---|
+| `random_in_round` | one round | weighted over what is left |
+| `random_in_experiment` | every round at once | weighted over what is left |
+| `ascending` | one round | the lowest index with anything left |
+| `descending` | one round | the highest index with anything left |
+| `random_with_replacement` | one round's worth of quota | weighted over the **configured** weights |
+
+**New: `descending` and `random_with_replacement`.** The first is the mirror of
+`ascending`, so a ladder of difficulties runs easy-to-hard under one and
+hard-to-easy under the other without anybody renumbering the trial types. Both
+deterministic orderings ignore `avoid_repeat` - they have nothing to avoid a
+repeat with, and honouring the flag would mean not running the weights.
+
+`random_with_replacement` is the only one that puts the token back: each trial is
+an independent draw and a round is balanced only in expectation, which is what
+you want when a subject can learn that a condition is used up. Its round is still
+`trials_per_round` accepted trials long - it has to be, or rounds and the stop
+rules would mean nothing - so per-type `remaining` reads as the quota still owed
+and can sit at zero while the round runs on. `TrialBag.total_remaining` is the
+authority for the round in every ordering.
+
+**New: `P(next)`.** `TrialBag.probabilities()` answers VStim's
+`GetProbabilityOfNextTrialType` for all five orderings, including 1 and 0 for the
+deterministic pair. It describes the declarative ordering, so it is advisory: a
+policy whose `select_trial` returns a type is never consulted through it.
 
 **New:** a seeded `random.Random` recorded with the session. VStim's
 `rand() % n` is biased towards low indices and unseedable in practice, so a VStim
@@ -355,7 +616,11 @@ stack onto a headless rig box. `env install psychopy` for labs whose triald
 staircase has to match an existing PsychoPy experiment exactly; prefer the
 standalone `questplus`, or `triald.adaptive`, otherwise.
 
-### API surface — **planned**
+### API surface — **done**, less two groups
+
+Specified in full, with the reasoning, in [API.md](API.md); what follows is the
+decision record behind it. `Environment` and `Records` are still **planned**, and
+the config-file shapes still want models of their own.
 
 **One transport: HTTP for request/reply, WebSocket for the state stream, JSON
 throughout.** The web UI and all three clients use the identical API — there is
@@ -386,23 +651,75 @@ protocols, which is a genuine wart and is accepted knowingly; there is no shared
 client code between them to preserve. If binary and low-latency ever do matter,
 the models below can gain a protobuf mapping without the API changing shape.
 
-| Group | Calls |
+| Group | Calls | |
+|---|---|---|
+| Session | `POST /api/session/{arm,stop}`, `/session/recording/{start,pause,resume,stop}` | done |
+| Trial loop | `POST /api/trial/{next,outcome,cancel}` | done |
+| State | `GET /api/state`, `WS /api/stream` | done |
+| Sets | `GET /api/sets`, `PUT`/`DELETE /api/sets/{name}`, `POST /api/sets/{name}/load` | done, less `SaveSet` to a file |
+| Config | `GET`/`PATCH /api/config`, `POST /api/config/{reset-rounds,reset-counters}` | done |
+| Scripting | `GET`/`PUT`/`DELETE /api/policy`, `POST /api/policy/check` | done |
+| Events | `POST /api/events/note` | done |
+| Debug | `GET`/`PUT /api/debug/sim`, `POST /api/debug/step`, `GET`/`PUT /api/debug/free-run` | done |
+| Environment | `ListPackages`, `InstallPackages`, `GetEnvironment` | planned |
+| Records | `ListSessions`, `GetSession`, `ReplaySession` | planned |
+
+`GetCounters` folded into `GetState` rather than becoming a call of its own: the
+counters are joined onto the trial type definitions server-side, so no client has
+to match the two up, and one snapshot cannot disagree with another.
+
+#### Contributions, not one report — **planned**
+
+The trial loop closes a trial with one atomic `OutcomeReport`, which assumes a
+single omniscient reporter. A rig made of separate daemons has no such thing:
+vstimd knows the frame loss, the eye tracker knows whether fixation was precise,
+the microcontroller knows the response and the reaction time, the valve knows what
+was actually delivered. All four feed the accept decision.
+
+VStim never had this problem, because `CurrentTrial` is an accumulator: the
+`SetTdr*` family lets each subsystem write its piece *while the trial runs*, and
+`OnOutcome()` closes it. The port kept the fields and lost the pattern.
+
+With no central executor to aggregate on the fast bus, this is the *primary* path
+rather than a fallback, and the division is clean: **the fast bus carries what
+must be timed, the slow bus carries what must be recorded.** Frame loss and
+precise fixation are recorded facts that happen to veto acceptance, and
+acceptance is decided in triald after the trial. Neither has to reach anybody
+within a frame.
+
+So the trial loop gains the accumulator:
+
+| `TrialTypeManagerInterface` | Wire |
 |---|---|
-| Session | `ArmSession`, `StartSession`, `StopSession`, `PauseRecording`, `ResumeRecording` |
-| Trial loop | `NextTrial → TrialSpec`, `ReportOutcome`, `CancelTrial` |
-| State | `GetState`, `Subscribe → stream`, `GetCounters` |
-| Sets | `ListSets`, `LoadSet`, `SaveSet` |
-| Config | `GetConfig`, `SetConfig`, `ResetRounds`, `ResetCounters` |
-| Scripting | `LoadPolicy(name, source) → sha256`, `CheckPolicy(source) → diagnostics`, `GetPolicy → name, source, sha256`, `GetPolicyState` |
-| Environment | `ListPackages`, `InstallPackages`, `GetEnvironment` |
-| Records | `ListSessions`, `GetSession`, `ReplaySession` |
+| `SetTdr*(...)` | `PATCH /api/trial/current` - many callers, any time |
+| `OnOutcome(code)` | `POST /api/trial/outcome` - one caller, closes the trial |
+| `GetCurrentTrial()` | `GET /api/trial/current` |
+| `StartPermittable()` | `GET /api/session/permittable`, now a distributed check |
+
+Two things it must do that the C++ cannot. **`trial_id` on every contribution**,
+so a late one cannot land on the next trial - the rule the behaviour source
+already has and the wire dropped. And **`source` on every contribution**, so the
+record says who claimed what; in VStim nothing records which subsystem set
+`PreciseFixation`.
+
+Per-field merge rules become explicit rather than implied. `SetTdrFrameLossTime`
+is quietly *first*-write-wins - it keeps the first loss - while the rest are
+last-write-wins. Invisible in C++, load-bearing on a wire where contributions can
+arrive out of order.
+
+
+The **debug group** is new and was not in this plan. It drives a
+`SimulatedBehaviourSource` through `runner.run_trial` - the same four calls a rig
+makes - so the whole daemon can be exercised with no hardware attached. It is not
+a second code path pretending to be the first, which is the entire reason the
+behaviour source is an interface.
 
 `LoadPolicy` and `CheckPolicy` take **source text**, not a path — see *How a
 policy reaches the daemon*. `CheckPolicy` returns diagnostics with line numbers
 so the web editor can mark the offending line rather than printing a traceback
 underneath it.
 
-#### The schema survives; the compiler does not
+#### The schema survives; the compiler does not - **done for the wire**
 
 Dropping protobuf drops the encoding, not the contract. **The wire schema is the
 contract, not the Python API** — three clients are written against it, never
@@ -416,18 +733,40 @@ convention rather than field numbers: add fields, never repurpose a name.
 The models also consolidate three things that are separate today, which is worth
 as much as the API:
 
-| Today | With the models |
-|---|---|
-| hand-written `as_dict()` in `state.py` | serialisation for free |
-| config files parsed and validated by hand | validation with real messages, which matters for a file a scientist edits |
-| the JSONL record shape, defined implicitly by `as_dict()` | the same models, so the record and the wire cannot drift |
+| Today | With the models | |
+|---|---|---|
+| hand-written `as_dict()` in `state.py` | serialisation for free | not yet |
+| config files parsed and validated by hand | validation with real messages, which matters for a file a scientist edits | not yet |
+| the JSONL record shape, defined implicitly by `as_dict()` | the same models, so the record and the wire cannot drift | **done, by test** |
+
+The third arrived without the first. `TrialRecordModel` was written to serialise
+byte-for-byte to what `as_dict()` writes, and
+`test_the_wire_and_the_record_carry_the_trial_identically` asserts it - which is
+what turns retiring `as_dict()` from a risky refactor into a safe one. It is also
+why the timestamp fields carry an explicit serialiser: pydantic spells UTC `Z`
+where `datetime.isoformat()` spells it `+00:00`, and the record format has years
+of files behind it, so the record wins.
 
 This follows vstimd's own principle — *the config format is the runtime shape, no
 DTO* — rather than adding a parallel set of transfer objects beside the
 dataclasses. Converting `state.py` and the config types is a real refactor of
 working, tested code; it belongs with the API work, not before it.
 
-### Web interface — **planned**
+### Web interface — session view **done**; the editor and the charts **planned**
+
+A proof of principle lives in `src/triald/web/`: three files, no build step, no
+framework and no CDN, because a rig box may have no route to the internet and a
+browser in a booth should not be waiting on unpkg. One WebSocket delivers a whole
+`SessionState` on every change and the page redraws from it, so there is no
+client-side model of the session that can disagree with the daemon about what is
+happening.
+
+It has the counters table with VStim's columns plus `P(next)`, the config
+controls, the sets with their switch rules and live progress towards them, and a
+debug panel that steps the simulated subject, free-runs it on a timer, or drives
+one trial by hand through all eleven outcomes with the frame-loss and
+imprecise-fixation modifiers - the cheapest way there is to watch a trial be
+*counted but not accepted*.
 
 Served by the daemon, no separate deployment, over the same HTTP and WebSocket
 API the clients use rather than a second bespoke one.
@@ -536,25 +875,160 @@ Each client ships the same small example — arm a session, run trials, report
 outcomes — and CI runs it against the daemon, so the three cannot drift apart
 silently.
 
-### Microcontroller link — **planned**
+### The microcontroller — **planned**, and no longer triald's peer
 
-`SerialBehaviourSource` over USB CDC, newline-delimited JSON at 921600 with a CRC
-and a sequence number. Teensy 4.1 or RP2350 preferred over an 8-bit Arduino;
-avoid ESP32 WiFi in the trial loop.
+The microcontroller is a **participant on the trigger bus**, not something triald
+holds a link to. It watches levers or lick ports, drives the valve, and **names
+the outcome** - it is the half of VStim's interval table that vstimd's armed
+animations cannot express. It arms on the edges vstimd raises, daqd bridges its
+real TTL pins to virtual ones, and it reports the finished trial to triald over
+the slow bus. triald never learns which channel a lick port is.
+
+That is a change of position. It was previously specified as triald's own serial
+peer, which put a hardware link and a firmware protocol behind the daemon that is
+supposed to have no timing budget.
 
 ```
-ITI      triald ──ARM(trial_id, params)──▶ MCU
-         triald ◀──ARMED(trial_id)─────── MCU     no trial starts without this
-trial    [hardware trigger edge — the MCU and vstimd see the same line]
-end      triald ◀──RESULT(trial_id, …)─── MCU
+ITI      triald ──configure(trial_id, outcome table)──▶ MCU
+         triald ◀──ready(trial_id)──────────────────── MCU   no trial without this
+trial    [vstimd pulses stimulus onset; the MCU opens its window on that edge]
+end      triald ◀──result(trial_id, outcome, RT, …)── MCU
 ```
 
-Three properties carry the correctness: `trial_id` on every message, so a late
-result cannot be attributed to the next trial; the `ARMED` ack, so no trial runs
-that the MCU was not confirmed configured for; and a **hardware** trigger edge,
-so reaction times are relative to stimulus onset and need no clock sync. The MCU
-fails safe — valve closed on watchdog timeout, reset, or link loss.
+Teensy 4.1 or RP2350 over USB CDC, newline-delimited JSON at 921600 with a CRC and
+a sequence number; avoid ESP32 WiFi in the trial loop. `seq` covers link-level
+retry, `trial_id` covers trial-level attribution — different jobs, both needed.
 
+Three properties carry the correctness, and they are the same three every other
+participant needs: `trial_id` on every message, so a late result cannot be
+attributed to the next trial; the `ARMED` ack, so no trial runs that the MCU was
+not confirmed configured for; and a **hardware** trigger edge, so reaction times
+are relative to stimulus onset and need no clock sync. The MCU fails safe — valve
+closed on watchdog timeout, reset, or link loss.
+
+**The firmware never learns the trial type.** It receives channels, windows and a
+reward duration, which is what keeps it stable while paradigms change. For a
+two-port lick task that means `correct_response` as a *list* of channels rather
+than the current scalar: `[]` for no response required, `[0]` for the left port,
+and `[0, 1]` for either — which is how shaping starts, and is not expressible
+today.
+
+#### What this leaves `behaviour.py` as
+
+`BehaviourSource` is documented as "the microcontroller seam". It is now the
+**simulator seam**: the interface `SimulatedBehaviourSource` implements so that
+`triald sim`, the debug stepper and the tests drive the real trial loop rather
+than a parallel one. That is worth keeping for exactly that reason, and
+`SerialBehaviourSource` comes off the roadmap — a real rig's outcomes arrive from
+the microcontroller over the slow bus, and its link is the rig's to own, not
+triald's.
+
+### The interval table, decomposed — **open**
+
+VStim's `ExpCtrl` / `Interval` / `TimeSqz` / `Valve` (~4,700 lines) is the
+*within*-trial state machine: a run of intervals, each waiting on a timer, a
+trigger line, a gaze window or a response, and each naming where to go next and
+which outcome to end on.
+
+**It is a state machine that configures itself from the trial type.** A trial
+type names a time sequence — `TrialTypeConfig::iTimeSequence`, and triald's own
+`TrialType.time_sequence` — the sequence *is* the machine's configuration, and
+the machine reloads it at the start of every trial. Choosing a trial type and
+choosing a state machine are one act. That is why the trial type is the join key
+between triald's configuration and everything below it, and why neither side owns
+a paradigm on its own.
+
+The coupling runs both ways. `TimeSequence::Update(currentFrame, ttm, …)` takes
+the trial type manager and calls into it while the trial runs: the `SetTdr*`
+family is how each interval writes what it learned into `CurrentTrial`, and
+`TerminateSequenceWithOutcome` is how the machine closes it.
+
+**This is the one VStim class that does not survive as a unit.** It splits in
+three, along the line between what must be timed and what must be recorded.
+
+| Half of `Interval` | Goes to | Why |
+|---|---|---|
+| durations, frame counts, VTL out-lines, chaining | **vstimd's armed animations** | frame-accurate, already built, already chains inside the server |
+| response windows, correct channels, timeouts, reward, `m_iTrialOutcomeAfterTimeout` | **the microcontroller** | microseconds, and only it can name an outcome in real time |
+| the millisecond values, the branch structure, the outcome names | **triald** | declarative data: editable, recordable, and varyable per trial by a policy |
+
+The line inside `Interval` is already drawn. Its config half is **milliseconds** —
+`m_FixTime_ms`, `m_RandInterval_ms`, the transitions, the VTL mappings,
+`m_iTrialOutcomeAfterTimeout`. Its runtime half is **frames** — `m_iFrame`,
+`m_nFrame`, `m_FixTime_frm`, recomputed by `RecomputeDurationInFrames()`.
+Milliseconds are declarative and portable; frames are execution and belong where
+the display clock is.
+
+#### What replaces the branch table
+
+`m_virtualTriggerNextStateMappings` — a vector of (line, edge) → next state — does
+not move to a new home. It becomes **per-participant armed behaviour plus a
+coupling contract**: which line each participant raises, and which line each one
+arms on. vstimd pulses stimulus onset; the MCU opens its response window on that
+edge; the MCU pulses trial-over; vstimd's end-interval animation arms on that.
+
+That contract is the artefact replacing the interval table, and it has to be
+written down. Line numbers agreed by convention between two firmware images and a
+scene file is exactly how a rig accumulates knowledge nobody can reconstruct.
+
+#### What triald would own
+
+The interval values as *data*, and the trial type's binding to them. Three things
+follow that a bare index cannot give:
+
+- **the record says what actually ran**, rather than an index into a file that
+  has since been edited;
+- **a policy can vary an interval** — a staircase on stimulus duration is a
+  policy computing `m_FixTime_ms` for one interval per trial, and today there is
+  nowhere to put that;
+- **sequences can be addressed by name.** `time_sequence = 3` has exactly the
+  disease the set switch rules had before #239: edit sequence 3 and every trial
+  type pointing at it silently changes meaning. Sets were cured by naming them;
+  time sequences want the same cure.
+
+`TrialParameters.response_window_ms` is the placeholder for all of this — one
+scalar standing in for a twenty-interval machine. For a two-port lick task
+`correct_response` also has to become a *list* of channels: `[]` for no response,
+`[0]` for the left port, `[0, 1]` for either — which is how shaping starts and is
+not expressible today.
+
+**triald rolls the random durations.** `m_RandInterval_ms` and
+`m_MaxNoRandIntervals` are rolled at runtime by
+`ResetFrameCounterAndComputeRandomDuration()` and never recorded, so a VStim
+trial's actual timing cannot be recovered afterwards. With the machine
+decomposed, two participants have to *agree* on a randomised interval anyway, so
+somebody must roll it once — and triald already owns a seeded RNG recorded with
+the session. Rolling it there resolves the agreement problem and makes replay
+exact. Improvement, not workaround.
+
+Executors produce outcomes; triald decides whether they count. The table names
+the outcome because only an executor can decide it in real time, and acceptance
+stays in triald.
+
+#### Two costs of the decomposition
+
+**The paradigm becomes two artefacts** — vstimd's armed animations and the MCU's
+outcome table — where VStim has one interval table. "What does this paradigm do"
+loses its single place to be read. Mitigated by triald owning and shipping both,
+so the record holds them together and there is one place to author them, but it
+is a real loss and should be named as one.
+
+**Nobody owns "where are we in the trial".** VStim's Experiment Controller shows
+the interval table and the current interval; with no central executor there is no
+such view. It has to be designed in deliberately — the participant that owns the
+sequence position publishing it — or it will be missed the first time a paradigm
+misbehaves at 11pm.
+
+#### Two overlaps to settle first
+
+`ExperimentControllerConfig::m_SimulateAllowedResp` is a "perfect subject" mode,
+and triald has `SimulatedBehaviourSource`. Two simulators at two layers; decide
+which is authoritative before they disagree.
+
+The error time extensions — `m_EarlyErrTime_ms`, `m_EyeErrTime_ms`,
+`m_LateErrTime_ms` — are punishment timeouts keyed by outcome. triald knows
+outcomes, the executor knows time. Values in triald's config, enforcement in the
+executor.
 ---
 
 ## Deliberately not triald's job
@@ -565,9 +1039,11 @@ VStim's process. Keeping them out is what lets the daemon be Python.
 | | |
 |---|---|
 | Rendering and frame timing | vstimd. triald never sees a frame. |
-| The interval state machine | VStim's `ExpCtrl`/`Interval`/`TimeSqz`. If it migrates, it goes to Rust. |
+| Running the within-trial sequence | It has no single owner any more: vstimd's armed animations and the microcontroller's outcome table, coupled by edges. triald holds the *values* — see *The interval table, decomposed*. |
 | Eye monitoring | triald receives *precise fixation: true/false*, not gaze samples. |
-| Digital I/O and the reward valve | triald says how many ms the type is worth; the MCU opens the valve. |
+| Digital I/O and the reward valve | daqd bridges the lines, the microcontroller opens the valve. triald says only how many ms the trial type is worth. |
+| The trigger bus | Raising and consuming virtual trigger lines. triald never touches one — it works in trials, not edges. |
+| Stimulator hardware of any kind | Sound, odour, lasers, tactile. A new one registers itself and needs no change here; if it ever does, the boundary is wrong. |
 | Stimulus definitions | A trial type names a condition; what it looks like is vstimd's scene. |
 | Frame-loss detection | Detected where the frames are. triald records the flag and lets it veto. |
 
@@ -575,10 +1051,27 @@ VStim's process. Keeping them out is what lets the daemon be Python.
 
 ## Open questions
 
-**Who calls `NextTrial()`?** VStim's render thread pulls when it is ready, which
-keeps triald purely reactive and is the simplest thing that works. triald pushing
-an armed trial ahead of time removes a round trip from the ITI but makes triald
-the session's clock. Pull is the safer default; revisit only if the ITI is tight.
+**Who calls `NextTrial()`?** ~~Open~~ — **triald initiates.** This is the one
+place the daemon architecture deliberately departs from VStim, where
+`ExpCtrl.cpp:175` has the experiment controller pull `ttm->GetNextTrialType()`.
+
+In one process under one mutex the question is moot: there is nobody to tell. The
+moment the rig is N processes that each configure themselves from the trial type,
+somebody has to start the fan-out and collect the readiness, and that is a
+requirement VStim never had. Three things then decide it:
+
+- **the readiness gate needs one collector.** If the controller pulls, the
+  controller collects readiness and triald degrades from the session authority to
+  a lookup service;
+- **stopping.** Under pull, "this session should end" has to be expressed by
+  refusing the next pull. Under push triald simply does not start another trial;
+- **set switching happens between trials**, and the thing that does the
+  between-trials work should be the thing that starts the next one.
+
+The old worry - that pushing makes triald the session's clock - is answered by
+where the jitter lands. triald times the *trial* boundary, never stimulus onset:
+onset is a trigger edge from the controller, so triald's jitter falls in the ITI
+where there is slack. Nothing about this puts a frame deadline on the slow bus.
 
 **Does the 256-trial-type ceiling stay?** It exists because of `.tdr`'s
 fixed-width fields and the `set × 256 + type` encoding that analysis scripts
@@ -605,20 +1098,19 @@ imported by triald, avoids reimplementing the binary reader entirely.
 ## Roadmap
 
 1. ~~Domain logic, policy API, simulator, tests~~ — **done**
-2. Session and rig config files, and the VStim importer
-3. **The API schema.** First, and on its own — Pydantic models covering the
-   wire, the config files and the record shape. The API, the web UI and all
-   three clients are written against it, so it is the one thing that must not be
-   discovered incrementally. This is also where `state.py`'s hand-written
-   `as_dict()` methods go away.
-4. HTTP and WebSocket API, plus policy upload and storage
-5. Web interface — session view, then the CodeMirror editor, then the charts
+2. ~~The API schema~~ — **done** for the wire and the record shape, in
+   `api/schemas.py`. Outstanding: the config-file shapes, and retiring
+   `state.py`'s `as_dict()` methods in favour of the models.
+3. ~~HTTP and WebSocket API, plus policy upload and storage~~ — **done**
+4. ~~Web interface, session view~~ — **done**
+5. Session and rig config files, and the VStim importer
 6. Python client, then MATLAB (HTTP/JSON), then Bonsai
-7. `SerialBehaviourSource` and reference firmware
-8. Packaging: numpy and scipy in the tree, nfpm, systemd, the apt archive,
+7. Web interface: the CodeMirror editor, then the charts
+8. The coupling contract, then the microcontroller's outcome table and firmware
+9. Packaging: numpy and scipy in the tree, nfpm, systemd, the apt archive,
    `trialctl env`
-9. `ReplaySession`
+10. `ReplaySession`, and the `Records` API group
 
-The ordering has one real constraint: step 3 precedes everything downstream of
-it. Steps 5 and 6 can run in parallel once it exists, and step 7 is independent
-of both.
+Steps 5 to 8 are independent of one another. Step 5 is the one that unblocks a
+real rig: until config files exist the daemon starts on the demo experiment or
+on nothing.

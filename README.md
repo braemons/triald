@@ -1,8 +1,8 @@
 # Trial Control Daemon — triald
 
-> **Status:** early alpha — the domain logic and the scripting API work and are
-> tested. The RPC surface, the web UI, the clients and the packaging are not
-> built yet.
+> **Status:** early alpha — the domain logic, the scripting API, the HTTP and
+> WebSocket API and a proof-of-principle web UI work and are tested. The
+> clients, the rig integration and the packaging are not built yet.
 
 **triald** decides what trial runs next, records what happened, and lets you write
 the decision in Python. It is the part of a behavioural rig that owns trial
@@ -45,6 +45,23 @@ uv run triald policy check my_policy.py   # import and smoke-run before arming
 `triald sim` runs a whole session against a synthetic subject with no hardware
 and no vstimd. It is the fastest way to find out that a policy does something
 stupid on trial 300.
+
+For the same thing with a face on it:
+
+```sh
+uv sync --group dev --extra serve
+uv run triald serve                       # http://127.0.0.1:8420, API docs at /docs
+```
+
+The session view shows the counters, the round, the sets and how far the loaded
+one has got towards its switch rule, and updates over a WebSocket as the session
+runs. Its debug panel drives a **simulated subject** through the real trial loop —
+step a trial, step five hundred, free-run on a timer, or select a trial and report
+any of the eleven outcomes by hand with the frame-loss and fixation modifiers, to
+watch a trial be counted but not accepted.
+
+The UI has no build step, no framework and no CDN: a rig box may have no route to
+the internet, and a browser in a booth should not be waiting on unpkg.
 
 ## Writing a policy
 
@@ -89,11 +106,11 @@ between.
 
 ## Planned
 
-A web UI served by the daemon: live counters, a small CodeMirror policy editor for
-tweaks between blocks, and performance charts you configure rather than accept —
-running hit rate, psychometric curves against a trial type's parameters, staircase
-traces, reaction times. Anything a policy returns from `snapshot()` is plottable
-without extra work.
+Performance charts you configure rather than accept — running hit rate,
+psychometric curves against a trial type's parameters, staircase traces, reaction
+times. Anything a policy returns from `snapshot()` is plottable without extra
+work. And a small CodeMirror policy editor for tweaks between blocks: read-only
+by default, with Check-before-Load not skippable.
 
 Clients for **Python**, **MATLAB** (over HTTP and JSON, so no toolbox and no
 MATLAB-to-Python version matching) and **Bonsai** (a NuGet package whose source
@@ -101,6 +118,8 @@ and sink operators map onto the state stream directly).
 
 ## Documentation
 
+- [`dev/API.md`](dev/API.md) — the API: what comes in, what goes out, and the
+  reasoning behind each shape.
 - [`dev/PLAN.md`](dev/PLAN.md) — the functional scope: what came from
   `TrialTypeManager`, what is new, what is deliberately out, and the open
   questions.
