@@ -1,0 +1,599 @@
+/*
+ * A rig-booth stylesheet: dense, high contrast, and legible from a metre away.
+ *
+ * The counters table is the thing people actually look at, so it gets the
+ * middle column and the largest share of the width. Everything else is a
+ * control panel around it.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  --bg: #f4f4f2;
+  --panel: #ffffff;
+  --panel-2: #f8f8f6;
+  --ink: #16181a;
+  --ink-2: #5c6470;
+  --line: #d8dade;
+  --accent: #2f6f4f;
+  --accent-ink: #ffffff;
+  --ok: #2f6f4f;
+  --warn: #a9601a;
+  --bad: #a33232;
+  --rec: #c0392b;
+  --row-hi: #eef4f0;
+
+  --radius: 6px;
+  --gap: 10px;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14161a;
+    --panel: #1d2025;
+    --panel-2: #23262c;
+    --ink: #e8eaed;
+    --ink-2: #98a1ad;
+    --line: #333840;
+    --accent: #4c9c73;
+    --accent-ink: #0e1512;
+    --ok: #6bbd92;
+    --warn: #d79a4e;
+    --bad: #e0736c;
+    --rec: #e0563f;
+    --row-hi: #232b27;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font:
+    13px/1.45 system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+}
+
+/* -- top bar ------------------------------------------------------------- */
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.bar h1 {
+  margin: 0;
+  font-size: 15px;
+  letter-spacing: 0.04em;
+  font-weight: 650;
+}
+
+.grow {
+  flex: 1;
+}
+
+.pills {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.pill {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+  background: var(--panel-2);
+}
+
+.pill.on {
+  border-color: transparent;
+  background: var(--ok);
+  color: var(--accent-ink);
+}
+
+.pill.rec {
+  background: var(--rec);
+  color: #fff;
+  border-color: transparent;
+  animation: breathe 2s ease-in-out infinite;
+}
+
+.pill.warn {
+  background: var(--warn);
+  color: #fff;
+  border-color: transparent;
+}
+
+@keyframes breathe {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pill.rec {
+    animation: none;
+  }
+}
+
+.link-state {
+  font-size: 11px;
+  color: var(--ink-2);
+  font-family: var(--mono);
+}
+
+/* -- banner -------------------------------------------------------------- */
+
+.banner {
+  padding: 8px 14px;
+  background: var(--bad);
+  color: #fff;
+  font-size: 12px;
+}
+
+.banner.info {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* -- layout -------------------------------------------------------------- */
+
+main {
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr) 290px;
+  gap: var(--gap);
+  padding: var(--gap);
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  main {
+    grid-template-columns: 1fr;
+  }
+}
+
+.col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  min-width: 0;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px 12px 12px;
+  min-width: 0;
+}
+
+.card h2 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-2);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.card h3 {
+  margin: 14px 0 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-2);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.tag {
+  font-size: 10px;
+  text-transform: none;
+  letter-spacing: 0;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--warn);
+  color: #fff;
+  font-weight: 600;
+}
+
+.hint {
+  font-size: 11px;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--ink-2);
+  font-weight: 400;
+}
+
+/* -- controls ------------------------------------------------------------ */
+
+.btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 6px;
+  align-items: center;
+}
+
+button {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--ink-2);
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+button.active {
+  background: var(--rec);
+  border-color: transparent;
+  color: #fff;
+  font-weight: 600;
+}
+
+input,
+select {
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--ink);
+  min-width: 0;
+}
+
+input[type="number"] {
+  width: 78px;
+}
+
+input[type="checkbox"] {
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 8px;
+}
+
+.field > span {
+  font-size: 11px;
+  color: var(--ink-2);
+}
+
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 6px 0;
+}
+
+.inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  margin-right: 10px;
+  margin-bottom: 4px;
+  cursor: pointer;
+}
+
+.modifiers {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--line);
+}
+
+/* -- session facts ------------------------------------------------------- */
+
+.current {
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin-bottom: 8px;
+  min-height: 34px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  margin: 8px 0 0;
+  font-size: 12px;
+}
+
+.facts dt {
+  color: var(--ink-2);
+}
+
+.facts dd {
+  margin: 0;
+  font-family: var(--mono);
+  text-align: right;
+}
+
+/* -- outcome buttons ----------------------------------------------------- */
+
+.outcome-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.outcome-grid button {
+  font-size: 11px;
+  padding: 4px 6px;
+  text-align: left;
+  font-family: var(--mono);
+}
+
+.outcome-grid button.accepted {
+  border-left: 3px solid var(--ok);
+}
+
+.outcome-grid button.refused {
+  border-left: 3px solid var(--bad);
+}
+
+/* -- sliders ------------------------------------------------------------- */
+
+.sliders {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 3px 8px;
+  align-items: center;
+  font-size: 11px;
+}
+
+.sliders label {
+  color: var(--ink-2);
+}
+
+.sliders input[type="range"] {
+  width: 100%;
+  padding: 0;
+  accent-color: var(--accent);
+}
+
+.sliders output {
+  font-family: var(--mono);
+  font-size: 11px;
+  min-width: 34px;
+  text-align: right;
+}
+
+/* -- tables -------------------------------------------------------------- */
+
+.grow-card {
+  min-height: 220px;
+}
+
+.table-scroll {
+  overflow-x: auto;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.table-scroll.short {
+  max-height: 240px;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+th,
+td {
+  padding: 3px 7px;
+  text-align: right;
+  border-bottom: 1px solid var(--line);
+}
+
+th {
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+  color: var(--ink-2);
+  font-weight: 600;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  z-index: 1;
+}
+
+th.name,
+td.name,
+th.left,
+td.left {
+  text-align: left;
+}
+
+tbody tr:hover {
+  background: var(--row-hi);
+}
+
+tr.total td {
+  font-weight: 700;
+  border-top: 2px solid var(--line);
+  border-bottom: none;
+  background: var(--panel-2);
+}
+
+td.zero {
+  color: var(--ink-2);
+  opacity: 0.45;
+}
+
+td.p-next {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.sep {
+  border-left: 1px solid var(--line);
+}
+
+.accepted-mark {
+  color: var(--ok);
+  font-weight: 700;
+}
+
+.refused-mark {
+  color: var(--bad);
+  font-weight: 700;
+}
+
+/* -- acceptance grid ----------------------------------------------------- */
+
+.accept-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px 8px;
+  font-size: 11.5px;
+}
+
+.accept-grid label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.accept-grid .veto {
+  grid-column: 1 / -1;
+  border-top: 1px dashed var(--line);
+  margin-top: 4px;
+  padding-top: 4px;
+}
+
+/* -- sets ---------------------------------------------------------------- */
+
+.set {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 7px 9px;
+  margin-bottom: 7px;
+  background: var(--panel-2);
+}
+
+.set.active {
+  border-color: var(--accent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.set-head {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin-bottom: 4px;
+}
+
+.set-name {
+  font-weight: 650;
+  font-size: 12.5px;
+}
+
+.set-meta {
+  font-size: 11px;
+  color: var(--ink-2);
+  font-family: var(--mono);
+}
+
+.set-rule {
+  font-size: 11px;
+  color: var(--ink-2);
+  margin: 3px 0;
+}
+
+.set-rule strong {
+  color: var(--ink);
+  font-family: var(--mono);
+}
+
+.bar-track {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+  margin: 5px 0 3px;
+}
+
+.bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 0.2s ease;
+}
+
+.problem {
+  background: color-mix(in srgb, var(--bad) 14%, transparent);
+  border: 1px solid var(--bad);
+  color: var(--bad);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 11.5px;
+  margin-bottom: 8px;
+}
+
+.set .btn-row {
+  margin: 4px 0 0;
+}
+
+.set .btn-row button {
+  font-size: 11px;
+  padding: 2px 8px;
+}
