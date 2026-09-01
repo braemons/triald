@@ -182,11 +182,23 @@ class SessionState:
     trial_type_names: tuple[str, ...]
     """Names of the active set's trial types, parallel to `per_trial_type`."""
 
+    p_next: tuple[float, ...]
+    """Chance of each trial type being drawn next, parallel to `per_trial_type`.
+
+    What the declarative ordering would do. A policy that selects for itself
+    makes this advisory - see :meth:`~triald.selection.TrialBag.probabilities`.
+    """
+
     set_name: str
     set_progress: SetProgress
     rounds_completed: int
     rounds_configured: int
     trials_per_round: int
+    trials_remaining: int
+    """Trials left before the bag refills - the round, or the whole experiment."""
+
+    stop_reason: str | None
+    """Why the session stopped, or None while it runs."""
 
     history: tuple[TrialRecord, ...]
     """Every finished trial this session, oldest first."""

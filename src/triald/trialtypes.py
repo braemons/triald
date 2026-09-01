@@ -144,6 +144,35 @@ class TrialTypeStore:
             raise ValueError(f"a set named {trial_type_set.name!r} is already in the store")
         self._sets[trial_type_set.name] = trial_type_set
 
+    def put(self, trial_type_set: TrialTypeSet) -> None:
+        """Add `trial_type_set`, or replace the one that has its name.
+
+        Replacing keeps the set's position, which matters under extended trial
+        type numbering: the number is derived from where the set sits in the
+        store, so editing a set must not silently renumber every trial after it.
+        """
+        self._sets[trial_type_set.name] = trial_type_set
+
+    def remove(self, name: str) -> TrialTypeSet:
+        """Take the set called `name` out of the store and return it.
+
+        Raises:
+            KeyError: if there is no such set.
+        """
+        try:
+            return self._sets.pop(name)
+        except KeyError:
+            raise KeyError(f"no trial type set named {name!r}") from None
+
+    def sets(self) -> list[TrialTypeSet]:
+        """Every set, in store order."""
+        return list(self._sets.values())
+
+    def index_of(self, name: str) -> int:
+        """Where `name` sits in the store, or -1. The set number, less one."""
+        names = list(self._sets)
+        return names.index(name) if name in self._sets else -1
+
     def get(self, name: str) -> TrialTypeSet:
         try:
             return self._sets[name]

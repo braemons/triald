@@ -17,7 +17,8 @@ import dataclasses
 import datetime as dt
 import logging
 import random
-from typing import Any
+from collections.abc import Mapping
+from typing import Any, ClassVar
 
 from triald.counters import ResultCount, TrialCountCriterion
 from triald.metadata import SessionEvent
@@ -506,6 +507,94 @@ class Session:
         self._all_trials_in_set = 0
         self._sync_remaining()
 
+    #: Config fields that may not change while the session is running.
+    #:
+    #: Each of them decides something that has already happened: which set was
+    #: loaded, how the trial types were numbered into the record, which sequence
+    #: the RNG has been drawing from. Changing one mid-session would leave a
+    #: record whose first half means something different from its second.
+    ARM_TIME_FIELDS: ClassVar[frozenset[str]] = frozenset(
+        {"initial_set", "extend_trial_type_number", "seed"}
+    )
+
+    #: Config fields the bag holds its own copy of, so changing one rebuilds it.
+    BAG_FIELDS: ClassVar[frozenset[str]] = frozenset({"ordering", "rounds", "avoid_repeat"})
+
+    def reconfigure(self, changes: Mapping[str, Any]) -> list[str]:
+        """Apply `changes` to the live config, and say what actually changed.
+
+        The declarative settings split three ways, and the split is the whole
+        content of this method:
+
+        * **live** - the accept flags and the stop rules are read fresh on every
+          trial, so a change takes effect on the next one and costs nothing;
+        * **bag-shaped** - the ordering, the round count and avoid-repeat are
+          held by the bag, so changing one rebuilds it. The current round starts
+          again from a full bag; the outcome counters are untouched;
+        * **arm-time** - :data:`ARM_TIME_FIELDS` are refused while the session
+          runs.
+
+        Raises:
+            SessionError: for an unknown field, a value that will not validate,
+                or an arm-time field while the session is running.
+        """
+        known = {f.name for f in dataclasses.fields(SessionConfig)}
+        unknown = sorted(set(changes) - known)
+        if unknown:
+            raise SessionError(
+                f"not session config fields: {', '.join(unknown)}. "
+                f"Known fields are {', '.join(sorted(known))}."
+            )
+
+        coerced = {key: self._coerce_config(key, value) for key, value in changes.items()}
+        changed = [k for k, v in coerced.items() if getattr(self._config, k) != v]
+
+        if self._running:
+            refused = sorted(set(changed) & self.ARM_TIME_FIELDS)
+            if refused:
+                raise SessionError(
+                    f"{', '.join(refused)} cannot change while the session is "
+                    f"running - stop it first, or the record's first half would "
+                    f"mean something different from its second"
+                )
+
+        if "rounds" in coerced and coerced["rounds"] < 1:
+            raise SessionError(f"rounds must be at least 1, got {coerced['rounds']}")
+
+        for key in changed:
+            setattr(self._config, key, coerced[key])
+
+        if set(changed) & self.BAG_FIELDS and self._bag is not None:
+            self._bag = TrialBag(
+                self._set,
+                ordering=self._config.ordering,
+                rounds=self._config.rounds,
+                avoid_repeat=self._config.avoid_repeat,
+                rng=self._rng,
+            )
+            self._rounds_completed = 0
+            self._sync_remaining()
+
+        return changed
+
+    @staticmethod
+    def _coerce_config(key: str, value: Any) -> Any:
+        """Turn a wire value into the type the config field holds.
+
+        A JSON caller sends ``"ascending"`` and a dict of accept flags; a Python
+        caller sends the enum and the dataclass. Both arrive here.
+        """
+        try:
+            if key == "ordering":
+                return Ordering(value)
+            if key == "stop_criterion":
+                return TrialCountCriterion(value)
+            if key == "acceptance" and isinstance(value, Mapping):
+                return AcceptancePolicy(**value)
+        except (ValueError, TypeError) as exc:
+            raise SessionError(f"{key}: {exc}") from exc
+        return value
+
     def reset_rounds(self) -> None:
         """Refill the bag and clear the round and set-progress counters."""
         if self._bag is not None:
@@ -548,7 +637,10 @@ class Session:
         remaining = self._bag.remaining
         for counter, n in zip(self._per_type, remaining, strict=False):
             counter.remaining = n
-        self._totals.remaining = sum(remaining)
+        # From the bag rather than the sum: with replacement a type can be drawn
+        # after its quota is spent, so the per-type counts no longer add up to
+        # the trials left in the round.
+        self._totals.remaining = self._bag.total_remaining
 
     # -- recording and running --------------------------------------------------
 
@@ -578,6 +670,44 @@ class Session:
         return self._running
 
     @property
+    def armed(self) -> bool:
+        """Whether :meth:`arm` has run. A stopped session stays armed."""
+        return self._bag is not None
+
+    @property
+    def recorder(self) -> Any:
+        return self._recorder
+
+    @recorder.setter
+    def recorder(self, recorder: Any) -> None:
+        """Attach or detach the recorder.
+
+        Settable mid-session because recording starts and stops mid-session:
+        VStim opens the ``.tdr`` on Start Rec, not when the experiment is armed.
+        Only trials whose :attr:`~triald.state.TrialSpec.recording` was latched
+        true reach it, so attaching one does not retrospectively record anything.
+        """
+        self._recorder = recorder
+
+    @property
+    def store(self) -> TrialTypeStore:
+        return self._store
+
+    @property
+    def trial_type_set(self) -> TrialTypeSet:
+        """The set that is loaded. Read it; change it through :meth:`load_set`."""
+        return self._set
+
+    @property
+    def config(self) -> SessionConfig:
+        """The live config. Change it through :meth:`reconfigure`, not in place."""
+        return self._config
+
+    @property
+    def policy(self) -> Policy:
+        return self._policy
+
+    @property
     def stop_reason(self) -> str | None:
         return self._stop_reason
 
@@ -603,11 +733,14 @@ class Session:
             totals=self._totals,
             per_trial_type=list(self._per_type),
             trial_type_names=tuple(t.name for t in self._set),
+            p_next=tuple(self._bag.probabilities()) if self._bag else (),
             set_name=self._set.name,
             set_progress=self._set_progress(),
             rounds_completed=self._rounds_completed,
             rounds_configured=self._config.rounds,
             trials_per_round=self._set.trials_per_round,
+            trials_remaining=self._bag.total_remaining if self._bag else 0,
+            stop_reason=self._stop_reason,
             history=tuple(self._history),
             seed=self._seed,
             config=self._config.as_dict(),
