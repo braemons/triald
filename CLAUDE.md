@@ -63,7 +63,20 @@ reaching for anything else.
   programming language with no debugger.
 - **`.tdr` outcome codes are a wire contract.** `TrialOutcome`'s numeric values
   are in every `.tdr` file the lab has written and every analysis script that
-  reads one. Never renumber them.
+  reads one. Never renumber them. Extending is fine — `NEVER_FINISHED = 11` is
+  the first that is not VStim's — but the value, once used, is used for ever,
+  and the name has to be spelled identically in all five copies of the table
+  (here, the web UI, statemachined's firmware, its daemon, its graph editor)
+  because outcomes cross the wire *by name*.
+- **`NEVER_FINISHED` is the only outcome triald assigns to itself.** Nothing
+  sends it. Every other code is a verdict from whoever watched the animal; this
+  one is triald recording that no verdict arrived within `trial_cap_ms`. It
+  exists because **nobody is responsible for delivering an outcome** — an
+  executor publishes and assumes nobody read it, since it cannot know whether a
+  consumer exists — so only the waiting side can tell "not yet" from "never".
+  Without it, a dead subscription is a session that quietly stops. The trial is
+  recorded rather than dropped, never accepted, and the session carries on: a
+  dead executor costs one trial, not the session.
 - **Five orderings, and only one puts the token back.** Four draw *without*
   replacement from a per-type remaining count, so a round is balanced by
   construction; `random_with_replacement` draws on the configured weights and is

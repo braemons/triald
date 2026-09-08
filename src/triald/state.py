@@ -59,6 +59,16 @@ class TrialSpec:
     started_at: dt.datetime
     """Wall-clock time the selection was made."""
 
+    deadline: dt.datetime | None = None
+    """When triald stops waiting to hear how this trial ended, or None.
+
+    Latched here rather than computed on demand so the record says what this
+    trial was *allowed* to take, which is the number somebody needs when asking
+    why a session is full of ``NEVER_FINISHED``. None means no deadline: the
+    simulator cannot be late, and a desk session somebody is watching does not
+    want a watchdog.
+    """
+
     def as_dict(self) -> dict[str, object]:
         return {
             "trial_number": self.trial_number,
@@ -71,6 +81,7 @@ class TrialSpec:
             "recording": self.recording,
             "paused": self.paused,
             "started_at": self.started_at.isoformat(),
+            "deadline": None if self.deadline is None else self.deadline.isoformat(),
         }
 
 

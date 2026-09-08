@@ -199,7 +199,7 @@ class SetsModel(Model):
 class AcceptanceModel(Model):
     """Which outcomes consume a slot in the round. *both*
 
-    The eleven per-outcome flags plus the two that cut across every outcome. Any
+    The per-outcome flags plus the two that cut across every outcome. Any
     of the three checks can veto on its own - see
     :meth:`triald.outcomes.AcceptancePolicy.accepts`.
     """
@@ -215,6 +215,7 @@ class AcceptanceModel(Model):
     unexpected_start_signal: bool = False
     wrong_start_signal: bool = False
     cancelled: bool = False
+    never_finished: bool = False
 
     frame_loss: bool = True
     imprecise_fixation: bool = True
@@ -241,6 +242,16 @@ class SessionConfigModel(Model):
     rounds: int = Field(10, ge=1)
     avoid_repeat: bool = True
     acceptance: AcceptanceModel = Field(default_factory=AcceptanceModel)
+    trial_cap_ms: int = Field(
+        0,
+        ge=0,
+        description=(
+            "How long a trial may take before triald gives up on hearing about "
+            "it and records NEVER_FINISHED. A watchdog, not a paradigm "
+            "parameter: set it to the longest a trial could honestly take. "
+            "Zero means no deadline."
+        ),
+    )
 
     stop_when_rounds_done: bool = False
     stop_after_trials: int | None = Field(None, ge=0)
@@ -257,6 +268,7 @@ class SessionConfigModel(Model):
             rounds=config.rounds,
             avoid_repeat=config.avoid_repeat,
             acceptance=AcceptanceModel.of(config.acceptance),
+            trial_cap_ms=config.trial_cap_ms,
             stop_when_rounds_done=config.stop_when_rounds_done,
             stop_after_trials=config.stop_after_trials,
             stop_criterion=config.stop_criterion,
@@ -271,6 +283,7 @@ class SessionConfigModel(Model):
             rounds=self.rounds,
             avoid_repeat=self.avoid_repeat,
             acceptance=self.acceptance.build(),
+            trial_cap_ms=self.trial_cap_ms,
             stop_when_rounds_done=self.stop_when_rounds_done,
             stop_after_trials=self.stop_after_trials,
             stop_criterion=self.stop_criterion,
@@ -291,6 +304,7 @@ class ConfigPatch(Model):
     rounds: int | None = Field(None, ge=1)
     avoid_repeat: bool | None = None
     acceptance: AcceptanceModel | None = None
+    trial_cap_ms: int | None = Field(None, ge=0)
     stop_when_rounds_done: bool | None = None
     stop_after_trials: int | None = Field(None, ge=0)
     stop_criterion: TrialCountCriterion | None = None
@@ -470,6 +484,7 @@ class TrialSpecModel(Model):
     recording: bool
     paused: bool
     started_at: Timestamp
+    deadline: Timestamp | None = None
 
     @classmethod
     def of(cls, spec: TrialSpec) -> TrialSpecModel:
