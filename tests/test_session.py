@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The trial loop: counting, rounds, stopping, and automatic set switching."""
 
 from __future__ import annotations

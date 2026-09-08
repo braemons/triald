@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Driving a session against a behaviour source.
 
 The loop in :func:`run_session` is the same one whether the outcomes come from a

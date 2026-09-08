@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The HTTP and WebSocket face of the daemon.
 
 Three things live here, in dependency order:

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Up/down staircases, and one end-to-end run through the session loop."""
 
 from __future__ import annotations

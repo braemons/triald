@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Session records: written per trial, readable after a crash, loud on failure."""
 
 from __future__ import annotations

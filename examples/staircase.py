@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """A 2-down-1-up staircase over a ladder of named trial types.
 
 Run it against a simulated subject before it goes near a rig:

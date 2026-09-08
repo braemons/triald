@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Outcome tallies, per trial type and in total.
 
 Every reported outcome lands here. Whether it was *accepted* - whether it

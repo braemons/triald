@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The routes, and the app that serves them.
 
 Thin on purpose. A route parses its body into a model, calls one method on

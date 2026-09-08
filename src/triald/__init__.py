@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """triald - a scriptable trial control daemon for brain research.
 
 Decides what trial runs next, records what happened, and lets an experimenter

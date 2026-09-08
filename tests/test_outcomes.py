@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Acceptance: the counted-versus-accepted distinction, and the two vetoes."""
 
 from __future__ import annotations

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The trial loop: the state machine everything else hangs off.
 
 Ported from ``TrialTypeManager``'s ``GetNextTrialType`` / ``UpdateRounds`` /

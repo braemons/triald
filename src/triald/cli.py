@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """``triald`` on the command line.
 
 Three things matter here and none of them is the daemon itself:

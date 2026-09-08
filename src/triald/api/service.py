@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """One rig's session, and everything the routes are allowed to do to it.
 
 The routes in :mod:`triald.api.app` are deliberately thin - parse, call a method

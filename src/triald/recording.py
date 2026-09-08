@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Writing sessions down.
 
 One directory per session, holding four files:

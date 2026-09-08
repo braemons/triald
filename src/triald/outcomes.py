@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Trial outcomes, their modifiers, and the rules that decide whether one counts.
 
 The numeric values of :class:`TrialOutcome` are a wire contract, not an

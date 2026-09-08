@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """What the daemon publishes: the current trial, the session snapshot, the record.
 
 These three types are the daemon's outward face. The same
