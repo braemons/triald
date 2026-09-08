@@ -89,7 +89,7 @@ The eleven outcome codes are a **wire contract**: they are in every `.tdr` the l
 has written and every analysis script that reads one, and are never renumbered.
 
 ```
--1 UNDETERMINED   2 WRONG_RESPONSE        5 EARLY   8 INEXPECTED_START_SIGNAL
+-1 UNDETERMINED   2 WRONG_RESPONSE        5 EARLY   8 UNEXPECTED_START_SIGNAL
  0 NOT_STARTED    3 EARLY_HIT             6 LATE    9 WRONG_START_SIGNAL
  1 HIT            4 EARLY_WRONG_RESPONSE  7 EYE_ERROR  10 CANCELLED
 ```

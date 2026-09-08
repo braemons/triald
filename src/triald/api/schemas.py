@@ -211,7 +211,7 @@ class AcceptanceModel(Model):
     early: bool = True
     late: bool = True
     eye_error: bool = True
-    inexpected_start_signal: bool = False
+    unexpected_start_signal: bool = False
     wrong_start_signal: bool = False
     cancelled: bool = False
 

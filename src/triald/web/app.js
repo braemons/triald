@@ -103,7 +103,7 @@ const OUTCOME_COLUMNS = [
   ["LATE", "Late", "Responded after the window closed"],
   ["EYE_ERROR", "Eye", "Gaze left the fixation window"],
   ["NOT_STARTED", "NoStart", "A start signal was required and never given"],
-  ["INEXPECTED_START_SIGNAL", "Inexp", "Start signal in an interval that is not a start interval"],
+  ["UNEXPECTED_START_SIGNAL", "Unexp", "Start signal in an interval that is not a start interval"],
   ["WRONG_START_SIGNAL", "WrgStrt", "The wrong start signal was given"],
   ["CANCELLED", "Canc", "Aborted by the experimenter"],
 ];
@@ -118,7 +118,7 @@ const OUTCOMES = [
   ["LATE", 6],
   ["EYE_ERROR", 7],
   ["NOT_STARTED", 0],
-  ["INEXPECTED_START_SIGNAL", 8],
+  ["UNEXPECTED_START_SIGNAL", 8],
   ["WRONG_START_SIGNAL", 9],
 ];
 
@@ -146,7 +146,7 @@ const ACCEPT_FIELDS = [
   ["late", "Late"],
   ["eye_error", "Eye error"],
   ["not_started", "Not started"],
-  ["inexpected_start_signal", "Inexp. start"],
+  ["unexpected_start_signal", "Unexp. start"],
   ["wrong_start_signal", "Wrong start"],
   ["cancelled", "Cancelled"],
 ];
