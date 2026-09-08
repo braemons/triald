@@ -50,7 +50,7 @@ class TrialParameters:
     configuration, and on a real rig it is configured from the trial type
     directly. See dev/PLAN.md, *The interval table, decomposed*.
 
-    Note that :attr:`graph` is still not the trial type: it names a state
+    Note that :attr:`statemachine_graph` is still not the trial type: it names a state
     machine, and several conditions routinely share one.
     """
 
@@ -62,7 +62,7 @@ class TrialParameters:
     rig quietly mislabels a dataset.
     """
 
-    graph: str = ""
+    statemachine_graph: str = ""
     """Name of the state graph to run. Empty means leave whatever is loaded.
 
     A **name**, never a slot: triald has no opinion about where a graph sits in

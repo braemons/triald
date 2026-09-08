@@ -78,7 +78,7 @@ reaching for anything else.
   TrialsBeforeStop`, which silently never fires again if a counter jumps.
 - **Sets are addressed by name**, not by a 1-based index into a fixed array. An
   index-based rule points somewhere else the moment sets are reordered.
-- **The state graph is named, not indexed.** `TrialType.graph` is the one field
+- **The state graph is named, not indexed.** `TrialType.statemachine_graph` is the one field
   of a condition that crosses to an executor, and it carries a name because an
   index points at a different machine the moment the executor's store is
   edited — the disease sets were cured of. It also means the record says which

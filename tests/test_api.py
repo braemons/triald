@@ -393,17 +393,24 @@ def test_a_graph_name_survives_the_round_trip(client: TestClient):
         json={
             "name": "easy",
             "trial_types": [
-                {"name": "easy_a", "trials_per_round": 1, "graph": "detection"},
-                {"name": "easy_b", "trials_per_round": 1, "graph": "discrimination"},
+                {"name": "easy_a", "trials_per_round": 1, "statemachine_graph": "detection"},
+                {
+                    "name": "easy_b",
+                    "trials_per_round": 1,
+                    "statemachine_graph": "discrimination",
+                },
             ],
             "switch_rule": {"enabled": False},
         },
     )
     state = client.get("/api/state").json()
-    assert [row["graph"] for row in state["counters"]] == ["detection", "discrimination"]
+    assert [row["statemachine_graph"] for row in state["counters"]] == [
+        "detection",
+        "discrimination",
+    ]
 
     spec = client.post("/api/trial/next").json()
-    assert spec["graph"] in {"detection", "discrimination"}
+    assert spec["statemachine_graph"] in {"detection", "discrimination"}
 
 
 def test_the_path_and_the_body_have_to_agree_about_the_name(client: TestClient):

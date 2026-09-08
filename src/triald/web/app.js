@@ -192,7 +192,7 @@ function renderCurrent() {
   if (trial) {
     el.textContent =
       `trial ${trial.trial_number} · ${trial.set_name} / ${trial.trial_type_name || `#${trial.trial_type_index}`}\n` +
-      `no. ${trial.trial_type_number}${trial.graph ? ` · ${trial.graph}` : ""} · ${trial.reward_ms} ms` +
+      `no. ${trial.trial_type_number}${trial.statemachine_graph ? ` · ${trial.statemachine_graph}` : ""} · ${trial.reward_ms} ms` +
       (trial.recording ? " · recording" : trial.paused ? " · pausing" : "");
     return;
   }
@@ -249,7 +249,7 @@ function renderCounters() {
         td(extended ? row.trial_type_number : row.index, "left"),
         td(row.name || `type ${row.index}`, "left name"),
         td(row.trials_per_round),
-        td(row.graph || "–", "left"),
+        td(row.statemachine_graph || "–", "left"),
         td(row.reward_ms),
         td(row.remaining, "sep"),
         `<td class="p-next">${row.p_next > 0 ? pct(row.p_next) : "–"}</td>`,

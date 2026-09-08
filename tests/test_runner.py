@@ -28,7 +28,12 @@ def make_session(*graphs: str) -> Session:
             TrialTypeSet(
                 name="main",
                 trial_types=[
-                    TrialType(name=f"t{i}", trials_per_round=1, reward_ms=100 + i, graph=g)
+                    TrialType(
+                        name=f"t{i}",
+                        trials_per_round=1,
+                        reward_ms=100 + i,
+                        statemachine_graph=g,
+                    )
                     for i, g in enumerate(graphs)
                 ],
             )
@@ -47,7 +52,7 @@ def test_the_graph_name_reaches_the_behaviour_source():
 
     record = run_trial(session, source)
 
-    assert source.armed[-1].graph == "detection"
+    assert source.armed[-1].statemachine_graph == "detection"
     assert source.armed[-1].trial_id == record.spec.trial_number
     assert source.armed[-1].reward_ms == record.spec.reward_ms
 
@@ -61,7 +66,7 @@ def test_every_trial_is_armed_with_its_own_graph():
     for _ in range(6):
         run_trial(session, source)
 
-    asked = {p.graph for p in source.armed}
+    asked = {p.statemachine_graph for p in source.armed}
     assert asked == {"detection", "discrimination"}
 
 
@@ -75,4 +80,4 @@ def test_the_trial_type_is_never_sent():
     run_trial(session, source)
 
     fields = set(vars(TrialParameters).get("__slots__", ()))
-    assert fields == {"trial_id", "graph", "reward_ms"}
+    assert fields == {"trial_id", "statemachine_graph", "reward_ms"}

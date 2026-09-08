@@ -58,7 +58,7 @@ def run_trial(session: Session, source: BehaviourSource) -> TrialRecord:
     source.arm(
         TrialParameters(
             trial_id=spec.trial_number,
-            graph=spec.graph,
+            statemachine_graph=spec.statemachine_graph,
             reward_ms=spec.reward_ms,
         )
     )

@@ -62,7 +62,7 @@ class TrialType:
     trials_per_round: int = 0
     """Weight: how many of this type make up one round. Zero means unused."""
 
-    graph: str = ""
+    statemachine_graph: str = ""
     """Name of the state graph this type runs with. Empty means whatever the
     executor already has loaded.
 
@@ -77,6 +77,12 @@ class TrialType:
     the executor that runs the trial owns them (statemachined's graph store),
     and it refuses a name it does not have. Interaction A in the contracts
     repo.
+
+    Spelled out rather than left as ``graph`` because in triald's vocabulary a
+    bare "graph" says nothing about whose it is: triald has none of its own, and
+    the reader of a trial type needs to know this names a state machine
+    somewhere else. On statemachined's own wire the field is ``graph`` - there
+    the namespace supplies what the name here has to carry.
     """
 
     reward_ms: int = 0

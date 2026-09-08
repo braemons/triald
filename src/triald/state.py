@@ -41,7 +41,7 @@ class TrialSpec:
     trial_type_name: str
     set_name: str
 
-    graph: str
+    statemachine_graph: str
     """Name of the state graph this trial runs, latched from the trial type.
 
     A name rather than an index, so the record says which graph actually ran
@@ -65,7 +65,7 @@ class TrialSpec:
             "trial_type_number": self.trial_type_number,
             "trial_type_name": self.trial_type_name,
             "set_name": self.set_name,
-            "graph": self.graph,
+            "statemachine_graph": self.statemachine_graph,
             "reward_ms": self.reward_ms,
             "recording": self.recording,
             "paused": self.paused,

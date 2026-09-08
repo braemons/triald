@@ -243,7 +243,7 @@ class Session:
             trial_type_number=self._effective_number(index),
             trial_type_name=trial_type.name,
             set_name=self._set.name,
-            graph=trial_type.graph,
+            statemachine_graph=trial_type.statemachine_graph,
             reward_ms=trial_type.reward_ms,
             recording=self._recording and not paused,
             paused=paused,

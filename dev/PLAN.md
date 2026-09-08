@@ -931,7 +931,7 @@ which outcome to end on.
 
 **It is a state machine that configures itself from the trial type.** A trial
 type names a state graph — `TrialTypeConfig::iTimeSequence` in VStim, and
-triald's own `TrialType.graph` — the graph *is* the machine's configuration, and
+triald's own `TrialType.statemachine_graph` — the graph *is* the machine's configuration, and
 the machine reloads it at the start of every trial. Choosing a trial type and
 choosing a state machine are one act. That is why the trial type is the join key
 between triald's configuration and everything below it, and why neither side owns
@@ -983,7 +983,7 @@ follow that a bare index cannot give:
 - **sequences can be addressed by name.** — **done.** `time_sequence = 3` had
   exactly the disease the set switch rules had before #239: edit sequence 3 and
   every trial type pointing at it silently changes meaning. Sets were cured by
-  naming them, and `TrialType.graph` is the same cure: a name, carried through
+  naming them, and `TrialType.statemachine_graph` is the same cure: a name, carried through
   `TrialSpec` into the record and out to the executor in `TrialParameters`.
   triald validates nothing about it — the executor owns the graphs and refuses a
   name it does not have.
