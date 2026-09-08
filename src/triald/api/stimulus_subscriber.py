@@ -142,9 +142,7 @@ class StimulusObserver:
         """
         if self._thread is not None:
             return
-        self._thread = threading.Thread(
-            target=self._loop, name="triald-stimulus", daemon=True
-        )
+        self._thread = threading.Thread(target=self._loop, name="triald-stimulus", daemon=True)
         self._thread.start()
 
     def close(self) -> None:
