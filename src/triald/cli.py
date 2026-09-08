@@ -26,9 +26,19 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from triald import __version__
 from triald.behaviour import SimulatedBehaviourSource
 from triald.policy import DeclarativePolicy, Policy, PolicyError, load_policy
 from triald.recording import read_session
+from triald.rig_configuration import (
+    DEFAULT_CONFIGURATION_PATH as DEFAULT_RIG_CONFIGURATION_PATH,
+)
+from triald.rig_configuration import (
+    DEFAULT_HOST,
+    DEFAULT_PORT,
+    RigConfiguration,
+    RigConfigurationError,
+)
 from triald.runner import run_session
 from triald.selection import Ordering
 from triald.session import Session, SessionConfig, SessionError
@@ -61,6 +71,10 @@ def main(argv: list[str] | None = None) -> int:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="triald", description=__doc__)
     parser.add_argument("-v", "--verbose", action="store_true")
+    # What a rig is running, without ssh and dpkg. The version comes from the
+    # tag by way of the installed metadata, so this and the package label
+    # cannot drift.
+    parser.add_argument("--version", action="version", version=__version__)
     sub = parser.add_subparsers(dest="command")
 
     sim = sub.add_parser("sim", help="run a session against a simulated subject")
@@ -92,11 +106,25 @@ def _build_parser() -> argparse.ArgumentParser:
     replay.add_argument("--policy", type=Path, help="policy to replay it through")
 
     serve = sub.add_parser("serve", help="run the API and the web UI")
+    # The box, not the experiment -- see triald/rig_configuration.py for why
+    # those are two files. Defaults to /etc/braemons/triald-rig-config.toml when
+    # it exists, which is what the systemd unit relies on; absent, the built-in
+    # defaults, which is what a laptop has always had.
+    serve.add_argument(
+        "--rig-config",
+        type=Path,
+        help=f"the box's settings (default: {DEFAULT_RIG_CONFIGURATION_PATH}, "
+        "and its absence means the built-in defaults)",
+    )
     # Localhost by default, never 0.0.0.0. A policy is Python running in the
     # daemon's process, so the API is remote code execution by design; exposing
     # it should be a choice somebody makes, not a default they discover.
-    serve.add_argument("--host", default="127.0.0.1", help="bind address")
-    serve.add_argument("--port", type=int, default=8420)
+    #
+    # The defaults are None rather than the values: `serve` cannot otherwise
+    # tell "the default" from "typed, and happens to match the default", and a
+    # rig config that set a port would be overridden by a flag nobody passed.
+    serve.add_argument("--host", help=f"bind address (default: {DEFAULT_HOST})")
+    serve.add_argument("--port", type=int, help=f"port (default: {DEFAULT_PORT})")
     serve.add_argument("--config", type=Path, help="session config JSON")
     serve.add_argument("--policy", type=Path, help="policy .py to load at startup")
     serve.add_argument(
@@ -271,12 +299,35 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         )
         return 1
 
-    store, config = _load_config(args.config) if args.config else demo_experiment()
+    try:
+        rig = RigConfiguration.load_from_toml_file(
+            args.rig_config if args.rig_config else DEFAULT_RIG_CONFIGURATION_PATH
+        )
+    except RigConfigurationError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    # A rig config named on the command line and not there is a typo, not a
+    # laptop. Silence would start a daemon on the wrong port with the wrong
+    # results directory and no way to tell.
+    if args.rig_config and rig.source is None:
+        print(f"error: no rig config at {args.rig_config}", file=sys.stderr)
+        return 1
+
+    # The command line wins over the file, everywhere. A rig's settings live in
+    # /etc; a flag is somebody standing at the box overriding them for one run.
+    host = args.host if args.host is not None else rig.host
+    port = args.port if args.port is not None else rig.port
+    results_dir = args.results_dir if args.results_dir is not None else rig.results_directory
+    policy_dir = args.policy_dir if args.policy_dir is not None else rig.policy_directory
+    session_config = args.config if args.config is not None else rig.session_config
+    policy_path = args.policy if args.policy is not None else rig.policy
+
+    store, config = _load_config(session_config) if session_config else demo_experiment()
 
     policy: Policy | None = None
-    if args.policy:
+    if policy_path:
         try:
-            policy = load_policy(args.policy)
+            policy = load_policy(policy_path)
         except PolicyError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
@@ -286,15 +337,17 @@ def _cmd_serve(args: argparse.Namespace) -> int:
             store,
             config,
             policy=policy,
-            policy_dir=args.policy_dir,
-            results_dir=args.results_dir,
+            policy_dir=policy_dir,
+            results_dir=results_dir,
         )
     )
-    if args.results_dir is None:
-        print("note: no --results-dir, so nothing will be written to disk")
+    if rig.source is not None:
+        print(f"rig config: {rig.source}")
+    if results_dir is None:
+        print("note: no results directory, so nothing will be written to disk")
 
-    print(f"triald on http://{args.host}:{args.port}  (API docs at /docs)")
-    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+    print(f"triald on http://{host}:{port}  (API docs at /docs)")
+    uvicorn.run(app, host=host, port=port, log_level="info")
     return 0
 
 

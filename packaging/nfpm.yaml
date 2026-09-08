@@ -1,0 +1,90 @@
+# One description of the package, both formats.
+#
+# nfpm rather than a debian/ directory plus a hand-written .spec: the two would
+# be the same list of files written twice, and the second copy is the one that
+# is wrong. vstimd needs cargo-deb and a .spec because it is Rust; this is a
+# Python tree and a handful of unit files, so it packs the way statemachined
+# does -- deliberately the same file with the names changed, because two rig
+# daemons that package differently are two things to remember.
+#
+# Everything ${LIKE_THIS} is filled in from the environment by
+# packaging/Makefile. Paths are not: nfpm substitutes in scalar metadata but not
+# in `contents[].src`, so the staged tree is named literally here and relative
+# to the repository root, which is where the Makefile runs nfpm from.
+#
+# Run `make -C packaging deb` rather than nfpm by hand -- the tree these point
+# at is what that Makefile builds.
+
+# The `braemons-` prefix is the archive's, not the daemon's: every package in
+# the braemons apt archive carries it, so `apt search braemons` is the answer to
+# "what is on this rig", and a name as generic as `triald` cannot collide with a
+# distribution package. Everything *inside* the package keeps the bare name --
+# the binary, the unit, the user, the logrotate entry -- because that is what an
+# operator types.
+name: braemons-triald
+version: ${TRIALD_PKG_VERSION}
+# The version is already the final string; nfpm must not try to read a `v`
+# prefix or a semver pre-release out of it. See packaging/scripts/git-version.sh
+# for why `~alpha1` is spelled that way.
+version_schema: none
+release: ${TRIALD_RELEASE}
+arch: ${TRIALD_ARCH}
+platform: linux
+
+maintainer: ${TRIALD_MAINTAINER}
+description: |
+  Scriptable trial control daemon for brain research.
+  Decides what the next trial is and what happened on the last one: trial
+  types, switch rules, adaptive procedures, and a policy written in Python.
+  Commands the daemons that run a trial; subscribes to what they publish.
+vendor: braemons
+homepage: https://github.com/braemons/triald
+license: AGPL-3.0-or-later
+section: science
+priority: optional
+
+depends:
+  - systemd
+recommends:
+  - logrotate
+
+contents:
+  # The vendored interpreter and the package inside it. Per-architecture despite
+  # being pure Python, which is the price of not depending on whatever Python
+  # the distribution ships -- and worth it on a rig, where an OS upgrade that
+  # moves Python must not be able to stop an experiment.
+  - src: build/package/root/opt/braemons/triald
+    dst: /opt/braemons/triald
+    type: tree
+
+  - src: build/package/root/usr/share/doc/braemons-triald
+    dst: /usr/share/doc/braemons-triald
+    type: tree
+
+  # One name on PATH for the operator, pointing into the vendored tree.
+  - src: /opt/braemons/triald/bin/triald
+    dst: /usr/bin/triald
+    type: symlink
+
+  - src: packaging/systemd/triald.service
+    dst: /usr/lib/systemd/system/triald.service
+  - src: packaging/sysusers/triald.conf
+    dst: /usr/lib/sysusers.d/triald.conf
+
+  # Conffiles: hand-edited, and an upgrade must not silently replace an edit.
+  # `config|noreplace` is what makes dpkg prompt and rpm write .rpmnew instead.
+  - src: packaging/etc/triald-rig-config.toml
+    dst: /etc/braemons/triald-rig-config.toml
+    type: config|noreplace
+  - src: packaging/logrotate/triald
+    dst: /etc/logrotate.d/triald
+    type: config|noreplace
+
+scripts:
+  postinstall: packaging/scripts/postinstall.sh
+  preremove: packaging/scripts/preremove.sh
+  postremove: packaging/scripts/postremove.sh
+
+deb:
+  fields:
+    Bugs: https://github.com/braemons/triald/issues

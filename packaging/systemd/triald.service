@@ -6,7 +6,11 @@ Wants=network-online.target
 
 [Service]
 Type=exec
-ExecStart=/opt/braemons/triald/bin/triald serve --config /etc/braemons/triald-rig-config.toml
+# --rig-config, not --config: the second is a session config JSON -- the trial
+# types and the seed -- and this file is the box. See
+# triald/rig_configuration.py. The path is also the default, and is named here
+# so that `systemctl cat triald` answers "which file is this reading".
+ExecStart=/opt/braemons/triald/bin/triald serve --rig-config /etc/braemons/triald-rig-config.toml
 User=triald
 Group=triald
 Restart=on-failure
@@ -25,6 +29,9 @@ ProtectHome=yes
 PrivateTmp=yes
 NoNewPrivileges=yes
 ReadWritePaths=/var/lib/braemons/triald
+
+# ProtectSystem=strict makes /etc read-only, which is what we want: the rig
+# config is edited by a person, never by the daemon.
 
 [Install]
 WantedBy=multi-user.target

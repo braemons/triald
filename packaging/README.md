@@ -1,14 +1,40 @@
-# Packaging — skeleton
+# Packaging
 
-**Nothing here is wired up yet.** The layout and the version script are lifted
-from vstimd so the two daemons package the same way; the `nfpm` config, the
-Docker builders and the Makefile targets still have to be written. See step 6 of
-the roadmap in `dev/PLAN.md`.
+```sh
+make -C packaging deb           # this machine, fast
+make -C packaging wheel         # the wheel and the sdist
+make -C packaging packages      # amd64 and arm64, deb and rpm, in the pinned image
+make -C packaging check         # stage the tree and run it, packaging nothing
+make -C packaging repro         # build twice and prove the bytes match
+```
 
-The `triald.service` unit refers to `triald serve`, which does not exist yet
-either — the RPC and web surfaces are step 3 and 4.
+`.github/workflows/release.yml` runs the last-but-one on a `v*` tag and attaches
+everything to a GitHub Release.
 
-## The intended shape
+## Two artifacts, two readers
+
+The **packages** are for a rig: a vendored interpreter, a unit file, a user, a
+conffile. The **wheel** is for everything that has to *import* triald rather
+than run it — the end-to-end tests across the three daemons, statemachined's
+`e2e` dependency group, an analysis script reading the outcome taxonomy. Neither
+substitutes for the other, and until the wheel existed the only way to have
+triald as a library was a git URL.
+
+## What `check` catches that the test suite cannot
+
+It runs the staged tree: *the* interpreter that is about to ship, with *the*
+dependencies that are about to ship. Everything else in this repository runs
+against a uv-built environment, so a `uvicorn[standard]` extra that resolved
+differently, a web asset missing from the wheel, or a launcher whose shebang
+names the build machine are all invisible until a Pi finds them.
+
+It also parses the unit's own `ExecStart` with the conffile that ships beside
+it, which is not a hypothetical: the unit shipped for months passing `--config
+/etc/braemons/triald-rig-config.toml` — a rig config handed to the flag that
+takes a *session* config JSON. That command line could never have started the
+daemon, and nothing noticed, because nothing was packaged.
+
+## The shape
 
 - **Vendored interpreter.** `uv` plus python-build-standalone build a
   self-contained tree at `/opt/braemons/triald`, so the artifact does not depend
@@ -24,13 +50,16 @@ either — the RPC and web surfaces are step 3 and 4.
   and a hand-written `.spec` for RPM.
 - **Published to the [braemons apt archive](https://github.com/braemons/packages)**,
   so rigs upgrade in place.
+- **Not on PyPI.** The wheel is a release asset. Publishing to PyPI is a
+  separate decision with a token behind it, and nothing needs it yet — the
+  consumers all pin a URL or a tag.
 
 ## Layout
 
 | Path | Purpose |
 |---|---|
 | `/opt/braemons/triald/` | the vendored interpreter and the package |
-| `/etc/braemons/triald-rig-config.toml` | rig config — endpoints, results dir, `policy_dir`, `extra_packages` |
+| `/etc/braemons/triald-rig-config.toml` | rig config — bind address, `results_directory`, `policy_directory`, and optionally a session config and policy to load at startup |
 | `/var/lib/braemons/triald/` | state and recorded sessions |
 | `/var/log/triald/` | logs, rotated weekly |
 | `/usr/share/doc/braemons-triald/` | the docs that ship with the package, named after the package |
@@ -56,3 +85,13 @@ Labs that want `QuestHandler` or `PsiHandler` install it into the daemon's own
 vendored interpreter with `trialctl env install psychopy`, which is
 ABI-compatible by construction because there is only one interpreter. See
 `dev/PLAN.md`, "The runtime environment".
+
+`trialctl` does not exist yet, and neither does the rig config's
+`extra_packages` — the rig config refuses keys it does not know rather than
+ignoring them, so that key is not accepted today. Recording a setting nothing
+acts on would be worse than not having it.
+
+numpy and scipy are installed by `packaging/Makefile`'s `RIG_EXTRAS` rather than
+declared in `pyproject.toml`. `dependencies = []` in the core is load-bearing:
+it is what lets the domain logic, the policy API and the simulator import with
+nothing installed. These belong to the *package*, not to the library.

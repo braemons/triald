@@ -1,0 +1,37 @@
+# One rig's triald, as installed. The box, not the experiment.
+#
+# The two are deliberately different files. This one holds what nobody edits
+# between blocks -- where the daemon binds, where session records go. The trial
+# types, the switch rules and the seed are a *session config*, which is JSON,
+# lives under /var/lib, and is loaded through the API or named by
+# `session_config` below.
+#
+# Edited by hand and never written by the daemon, which is why dpkg and rpm are
+# told to leave it alone on upgrade. Everything here is optional; a commented
+# key is the built-in default.
+#
+# After editing:  sudo systemctl restart triald
+
+# Where the API and the web UI listen.
+#
+# **127.0.0.1 on purpose.** A policy is Python running inside the daemon, so
+# this API is remote code execution by design -- the loopback default means
+# exposing it to the network is something somebody typed rather than something
+# they discovered. On a rig where a console on another machine has to reach it,
+# set 0.0.0.0 here and put it behind whatever the lab already uses.
+#host = "127.0.0.1"
+#port = 8420
+
+# Session records. Without this the daemon runs and writes nothing, which is
+# right for a laptop and wrong for a rig -- so the package sets it.
+results_directory = "/var/lib/braemons/triald/sessions"
+
+# Policies uploaded through the API land here.
+policy_directory = "/var/lib/braemons/triald/policies"
+
+# A session config to load at startup, and a policy to load with it. Both
+# unset by default: a daemon that comes up after a reboot with no experiment
+# loaded is waiting to be told what to run, which is safer than a daemon that
+# resumes something nobody asked it to.
+#session_config = "/var/lib/braemons/triald/sessions/current.json"
+#policy = "/var/lib/braemons/triald/policies/current.py"

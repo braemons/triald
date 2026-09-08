@@ -16,6 +16,19 @@ The public surface is what a policy needs:
 
 from __future__ import annotations
 
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _installed_version
+
+#: Read from the installed distribution rather than written here, because the
+#: version comes from the git tag and is stamped into pyproject.toml at build
+#: time (packaging/scripts/git-version.sh). A literal here would be a second
+#: place to forget. `0.0.0+unknown` means this is a checkout that was never
+#: installed -- which is what `python -c "import triald"` from src/ is.
+try:
+    __version__ = _installed_version("triald")
+except PackageNotFoundError:  # pragma: no cover - only outside an install
+    __version__ = "0.0.0+unknown"
+
 from triald.adaptive import Staircase, WeightedUpDown
 from triald.behaviour import (
     BehaviourSource,
@@ -93,6 +106,7 @@ __all__ = [
     "TrialTypeSet",
     "TrialTypeStore",
     "WeightedUpDown",
+    "__version__",
     "load_policy",
     "read_events",
     "read_manifest",

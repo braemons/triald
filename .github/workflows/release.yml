@@ -1,0 +1,188 @@
+name: Release
+
+# Tag-driven release: builds the .debs, the .rpms and the wheel, then publishes
+# them all on a GitHub Release.
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# Re-running the workflow for an existing tag updates that release's assets.
+#
+# statemachined's release.yml is the model, with two differences. There is no
+# firmware job, because there is no board. And a wheel is published beside the
+# packages, which no other braemons daemon does -- see the `wheel` job below for
+# why triald is the one that needs it.
+on:
+  push:
+    tags: ['v*']
+  # Manual runs are useful for exercising the build without cutting a tag.
+  # They produce workflow artifacts but no release (see the `release` job's if:).
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # ── .deb / .rpm ────────────────────────────────────────────────────────────
+  # One job per architecture so a single one failing does not hide the other,
+  # and so the two run in parallel rather than serially inside one runner. Each
+  # builds inside packaging/docker/Dockerfile.package-builder, whose base image
+  # and tools are pinned -- that container, not this runner, is what makes the
+  # artifact a function of the commit.
+  packages:
+    name: packages-${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The version is derived from the git tag, and the default shallow
+          # fetch brings down no tags at all -- `git describe` would fail.
+          fetch-depth: 0
+
+      # There is nothing to cross-compile -- the daemon is Python -- but the
+      # interpreter vendored into the package and the numpy/scipy wheels beside
+      # it are native artifacts, so the arm64 package is built by running the
+      # builder image *as* arm64.
+      - name: Register binfmt handlers
+        if: matrix.arch == 'arm64'
+        run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+
+      # Fails fast and visibly when the tag situation leaves the build without
+      # a version, rather than aborting deep inside a Docker build.
+      - name: Resolve version
+        run: echo "building version $(make -s -C packaging print-version)"
+
+      - name: Build
+        run: make -C packaging packages-${{ matrix.arch }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pkg-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  # ── The wheel ─────────────────────────────────────────────────────────────
+  # Architecture-independent, and a different artifact for a different reader.
+  #
+  # The packages are for a rig: a whole interpreter, a unit file, a user. The
+  # wheel is for everything that has to *import* triald rather than run it --
+  # the end-to-end tests across the three daemons, statemachined's `e2e`
+  # dependency group, somebody's analysis notebook reading the outcome taxonomy.
+  # None of those want a system daemon installed to get at a Python package, and
+  # until this existed the only way to have triald was a git URL.
+  #
+  # Built here rather than lifted out of the package jobs: those produce one
+  # each and the two are identical, so taking either would be arbitrary, and a
+  # bare runner proves the wheel needs no container.
+  wheel:
+    name: wheel
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Build the wheel and the sdist
+        run: make -C packaging wheel
+
+      # The stamped version, checked rather than assumed. pyproject.toml carries
+      # the 0.0.0 sentinel, and a 0.0.0 wheel on a release is one nobody can
+      # correlate with a commit -- the packaging Makefile already refuses that,
+      # and this is the same refusal at the filename.
+      - name: The version is the tag's
+        run: |
+          expected=$(make -s -C packaging print-version)
+          ls dist/
+          test -n "$(find dist -name "triald-*.whl" ! -name 'triald-0.0.0*')" \
+            || { echo "the wheel is unstamped (expected $expected)"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  # ── Publish ───────────────────────────────────────────────────────────────
+  release:
+    needs: [packages, wheel]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      # Both package jobs build a wheel of their own -- it costs seconds inside
+      # a container that is already staging the source -- so the same filename
+      # arrives three times. `-n` keeps the first and does not ask.
+      - name: Collect release assets
+        run: |
+          mkdir -p release
+          find artifacts -type f \( -name '*.deb' -o -name '*.rpm' \
+               -o -name '*.whl' -o -name '*.tar.gz' \) \
+               -exec cp -n {} release/ \;
+          ls -lh release/
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          NOTES=$(cat <<'EOF'
+          ## Installing on a rig
+
+          **Debian / Ubuntu / Raspberry Pi OS** —
+          `sudo apt install ./braemons-triald_*_<arch>.deb`
+
+          **Fedora / RHEL** — `sudo dnf install ./braemons-triald-*.<arch>.rpm`
+
+          The package is enabled but **not started**. Say what the rig is in
+          `/etc/braemons/triald-rig-config.toml`, then `sudo systemctl start
+          triald` and open port 8420.
+
+          It listens on **127.0.0.1** until you say otherwise, and that is
+          deliberate: a policy is Python running inside the daemon, so this API
+          is remote code execution by design. Exposing it should be something
+          you typed.
+
+          Everything the daemon writes lives under
+          `/var/lib/braemons/triald/`, which an upgrade or a removal never
+          touches. numpy and scipy are in the package; PsychoPy deliberately is
+          not.
+
+          ## Importing it
+
+          `triald-<version>-py3-none-any.whl` is the same code as a plain Python
+          package, for everything that reads triald rather than runs it — the
+          outcome taxonomy, the trial-type models, the end-to-end tests across
+          the rig:
+
+          ```
+          pip install ./triald-*.whl          # the library
+          pip install './triald-*.whl[serve]' # and the API
+          ```
+          EOF
+          )
+          # A hyphen is semver's pre-release marker (v0.1.0-alpha1). Without
+          # this, GitHub would badge an alpha as the project's Latest release.
+          PRERELEASE=
+          case "$TAG" in *-*) PRERELEASE=--prerelease ;; esac
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" release/* --clobber
+          else
+            gh release create "$TAG" release/* \
+              --title "$TAG" --notes "$NOTES" --verify-tag $PRERELEASE
+          fi

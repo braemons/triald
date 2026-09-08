@@ -17,7 +17,26 @@
 #   v0.1.0-alpha4             -> 0.1.0~alpha4          (sorts before 0.1.0)
 #   v0.1.0-alpha4-2-gabc123   -> 0.1.0~alpha4+2.gabc123 (sorts after the tag)
 #   ...with uncommitted changes appending +dirty
+#
+# ── The addition vstimd does not need ────────────────────────────────────────
+#
+# vstimd's artifacts are all packages. This one also builds a Python wheel --
+# one that goes inside the package, and one that a release publishes -- and PEP
+# 440 does not allow '~'. So `--pep440` prints the same version with the
+# pre-release separator dropped rather than translated:
+#
+#   v0.1.0-alpha4  ->  0.1.0~alpha4  for dpkg and rpm
+#                  ->  0.1.0alpha4   for pip, which normalises it to 0.1.0a4
+#
+# The two are never interchangeable and are never both correct in one place:
+# the package wears the first, the wheel inside it wears the second. Identical
+# to statemachined's, deliberately -- the two daemons package the same way.
 set -eu
+
+form=deb
+if [ "${1:-}" = "--pep440" ]; then
+    form=pep440
+fi
 
 # Reject anything dpkg or rpm would refuse, here rather than 20 minutes into a
 # container build. The character set is the intersection of what the two allow
@@ -33,6 +52,11 @@ emit_checked() {
         echo "  A version must start with a digit and use only [A-Za-z0-9.+~]." >&2
         echo "  Rename the tag (v1.2.3 or v1.2.3-alpha1) or pass TRIALD_VERSION." >&2
         exit 1
+    fi
+    # PEP 440 has no '~'. Everything else the check above allows, it allows too.
+    if [ "$form" = pep440 ]; then
+        printf '%s\n' "$1" | tr -d '~'
+        return
     fi
     printf '%s\n' "$1"
 }

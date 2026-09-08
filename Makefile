@@ -1,7 +1,8 @@
 # Convenience wrappers. Everything here is `uv` underneath; run the uv commands
 # directly if you prefer.
 
-.PHONY: help sync test lint fmt typecheck check sim clean version
+.PHONY: help sync test lint fmt typecheck check sim clean version \
+        deb wheel packages package-check
 
 help:
 	@echo "make sync       install the dev environment"
@@ -12,6 +13,12 @@ help:
 	@echo "make check      lint + typecheck + test + a simulated session"
 	@echo "make sim        run a simulated session"
 	@echo "make version    the version the git tag implies"
+	@echo ""
+	@echo "Packaging (packaging/Makefile has the rest, and the reasons):"
+	@echo "make deb        the .deb for this machine"
+	@echo "make wheel      the wheel and the sdist"
+	@echo "make packages   every artifact a release publishes, in the pinned image"
+	@echo "make package-check  stage the tree and run it, packaging nothing"
 
 sync:
 	uv sync --group dev
@@ -39,6 +46,21 @@ sim:
 
 version:
 	@sh packaging/scripts/git-version.sh
+
+# Thin wrappers. The reasons live in packaging/Makefile, which is where the
+# recipes are; these exist so that `make deb` from the root does the obvious
+# thing rather than nothing.
+deb:
+	$(MAKE) -C packaging deb
+
+wheel:
+	$(MAKE) -C packaging wheel
+
+packages:
+	$(MAKE) -C packaging packages
+
+package-check:
+	$(MAKE) -C packaging check
 
 clean:
 	rm -rf .pytest_cache .ruff_cache .coverage htmlcov dist build
