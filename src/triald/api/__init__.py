@@ -16,11 +16,35 @@ Three things live here, in dependency order:
 Importing this package needs the ``serve`` extra (``pip install triald[serve]``).
 The domain logic in the rest of ``triald`` needs nothing at all, which is why
 these three modules are off to one side rather than mixed in with it.
+
+**The names below are resolved lazily, and that is not a micro-optimisation.**
+Not everything under ``api/`` needs the same things: `statemachine_executor`
+speaks HTTP and needs ``httpx``, `stimulus_subscriber` speaks ZeroMQ and needs
+neither FastAPI nor httpx nor anything else at import time. Re-exporting
+`create_app` eagerly would have made *every* module here cost a FastAPI import,
+so a subscriber that was carefully written to need nothing could not be imported
+on a machine without the ``serve`` extra — its own care defeated by a
+neighbour's. PEP 562 keeps the convenient spelling without the coupling.
 """
 
 from __future__ import annotations
 
-from triald.api.app import create_app
-from triald.api.service import ServiceError, SessionService
+from typing import Any
 
 __all__ = ["ServiceError", "SessionService", "create_app"]
+
+
+def __getattr__(name: str) -> Any:
+    if name == "create_app":
+        from triald.api.app import create_app
+
+        return create_app
+    if name in ("ServiceError", "SessionService"):
+        from triald.api import service
+
+        return getattr(service, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return sorted(__all__)
