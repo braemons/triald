@@ -384,6 +384,28 @@ def test_a_set_is_replaced_in_place_keeping_its_number(client: TestClient):
     assert easy["trials_per_round"] == 6
 
 
+def test_a_graph_name_survives_the_round_trip(client: TestClient):
+    # The graph is named on the wire, never indexed, and the counters table is
+    # where the UI reads it back.
+    arm(client)
+    client.put(
+        "/api/sets/easy",
+        json={
+            "name": "easy",
+            "trial_types": [
+                {"name": "easy_a", "trials_per_round": 1, "graph": "detection"},
+                {"name": "easy_b", "trials_per_round": 1, "graph": "discrimination"},
+            ],
+            "switch_rule": {"enabled": False},
+        },
+    )
+    state = client.get("/api/state").json()
+    assert [row["graph"] for row in state["counters"]] == ["detection", "discrimination"]
+
+    spec = client.post("/api/trial/next").json()
+    assert spec["graph"] in {"detection", "discrimination"}
+
+
 def test_the_path_and_the_body_have_to_agree_about_the_name(client: TestClient):
     response = client.put("/api/sets/easy", json={"name": "hard", "trial_types": []})
     assert response.status_code == 400

@@ -37,7 +37,7 @@ from triald.state import TrialSpec
 class TrialParameters:
     """What a behaviour source is told before a trial runs.
 
-    Two fields, because two are what a source actually needs from triald. It
+    Three fields, because three are what a source actually needs from triald. It
     once carried a response channel, a response window, a hold time, a timeout
     and a start-signal flag - the shape of a serial protocol to a
     microcontroller. triald no longer owns that link, nothing ever read those
@@ -49,6 +49,9 @@ class TrialParameters:
     What an executor needs in order to run a trial is the executor's
     configuration, and on a real rig it is configured from the trial type
     directly. See dev/PLAN.md, *The interval table, decomposed*.
+
+    Note that :attr:`graph` is still not the trial type: it names a state
+    machine, and several conditions routinely share one.
     """
 
     trial_id: int
@@ -57,6 +60,16 @@ class TrialParameters:
     A result for any other trial is refused rather than accepted - this is what
     stops a late outcome being attributed to the trial after it, which is how a
     rig quietly mislabels a dataset.
+    """
+
+    graph: str = ""
+    """Name of the state graph to run. Empty means leave whatever is loaded.
+
+    A **name**, never a slot: triald has no opinion about where a graph sits in
+    the executor's store, and an index would silently point at a different
+    machine the moment that store were edited. The executor refuses a name it
+    does not have, which is a configuration error triald can report rather than
+    a trial that quietly ran the wrong thing.
     """
 
     reward_ms: int = 0

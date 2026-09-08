@@ -102,7 +102,13 @@ class TrialTypeModel(Model):
 
     name: str = ""
     trials_per_round: int = Field(0, ge=0, description="Weight; zero means unused.")
-    time_sequence: int = Field(0, ge=0)
+    graph: str = Field(
+        "",
+        description=(
+            "Name of the state graph this type runs; empty means whatever the "
+            "executor already has loaded. A name, never an index."
+        ),
+    )
     reward_ms: int = Field(0, ge=0)
     params: dict[str, Any] = Field(
         default_factory=dict,
@@ -114,7 +120,7 @@ class TrialTypeModel(Model):
         return cls(
             name=trial_type.name,
             trials_per_round=trial_type.trials_per_round,
-            time_sequence=trial_type.time_sequence,
+            graph=trial_type.graph,
             reward_ms=trial_type.reward_ms,
             params=dict(trial_type.params),
         )
@@ -123,7 +129,7 @@ class TrialTypeModel(Model):
         return TrialType(
             name=self.name,
             trials_per_round=self.trials_per_round,
-            time_sequence=self.time_sequence,
+            graph=self.graph,
             reward_ms=self.reward_ms,
             params=dict(self.params),
         )
@@ -446,7 +452,7 @@ class TrialSpecModel(Model):
     trial_type_number: int
     trial_type_name: str
     set_name: str
-    time_sequence: int
+    graph: str
     reward_ms: int
     recording: bool
     paused: bool
@@ -528,7 +534,7 @@ class CounterRowModel(ResultCountModel):
     trial_type_number: int = Field(description="Extended by the set number when that is on.")
     name: str
     trials_per_round: int
-    time_sequence: int
+    graph: str
     reward_ms: int
     p_next: float = Field(
         description=(
@@ -726,7 +732,7 @@ def counter_rows(
                 trial_type_number=number_offset + index,
                 name=trial_type.name,
                 trials_per_round=trial_type.trials_per_round,
-                time_sequence=trial_type.time_sequence,
+                graph=trial_type.graph,
                 reward_ms=trial_type.reward_ms,
                 p_next=state.p_next[index] if index < len(state.p_next) else 0.0,
             )
