@@ -243,7 +243,7 @@ class Session:
             trial_type_number=self._effective_number(index),
             trial_type_name=trial_type.name,
             set_name=self._set.name,
-            time_sequence=trial_type.time_sequence,
+            statemachine_graph=trial_type.statemachine_graph,
             reward_ms=trial_type.reward_ms,
             recording=self._recording and not paused,
             paused=paused,
@@ -289,18 +289,35 @@ class Session:
         except KeyError:
             return None
 
-    def report_outcome(self, report: OutcomeReport) -> TrialRecord:
+    def report_outcome(
+        self, report: OutcomeReport, *, trial_id: int | None = None
+    ) -> TrialRecord:
         """Take the outcome of the trial in flight and advance the session.
 
         Counts it, decides whether it was accepted, advances the round if it was,
         fires the set switch if its criterion has been reached, checks the stop
         conditions, records it, and tells the policy - in that order.
 
+        Args:
+            trial_id: which trial this is the outcome of. Checked against the
+                trial in flight and refused if it is any other one. It is what
+                stops a late or duplicated report being attributed to the trial
+                *after* the one it belongs to, which is how a rig quietly
+                mislabels a dataset - the failure that only a report arriving
+                over a network can have. None is for in-process callers, which
+                hold the spec they are answering and cannot be late; the API
+                requires it on every inbound message.
+
         Raises:
-            SessionError: if no trial is in flight.
+            SessionError: if no trial is in flight, or `trial_id` is not its.
         """
         if self._current is None:
             raise SessionError("no trial is in flight")
+        if trial_id is not None and trial_id != self._current.trial_number:
+            raise SessionError(
+                f"outcome reported for trial {trial_id}, but trial "
+                f"{self._current.trial_number} is the one in flight"
+            )
 
         spec = self._current
         self._current = None

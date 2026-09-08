@@ -102,7 +102,13 @@ class TrialTypeModel(Model):
 
     name: str = ""
     trials_per_round: int = Field(0, ge=0, description="Weight; zero means unused.")
-    time_sequence: int = Field(0, ge=0)
+    statemachine_graph: str = Field(
+        "",
+        description=(
+            "Name of the state graph this type runs; empty means whatever the "
+            "executor already has loaded. A name, never an index."
+        ),
+    )
     reward_ms: int = Field(0, ge=0)
     params: dict[str, Any] = Field(
         default_factory=dict,
@@ -114,7 +120,7 @@ class TrialTypeModel(Model):
         return cls(
             name=trial_type.name,
             trials_per_round=trial_type.trials_per_round,
-            time_sequence=trial_type.time_sequence,
+            statemachine_graph=trial_type.statemachine_graph,
             reward_ms=trial_type.reward_ms,
             params=dict(trial_type.params),
         )
@@ -123,7 +129,7 @@ class TrialTypeModel(Model):
         return TrialType(
             name=self.name,
             trials_per_round=self.trials_per_round,
-            time_sequence=self.time_sequence,
+            statemachine_graph=self.statemachine_graph,
             reward_ms=self.reward_ms,
             params=dict(self.params),
         )
@@ -205,7 +211,7 @@ class AcceptanceModel(Model):
     early: bool = True
     late: bool = True
     eye_error: bool = True
-    inexpected_start_signal: bool = False
+    unexpected_start_signal: bool = False
     wrong_start_signal: bool = False
     cancelled: bool = False
 
@@ -330,8 +336,20 @@ class OutcomeReportModel(Model):
     participates in the accept decision has to be here, because the daemon has no
     other way to learn it: ``frame_loss`` comes from vstimd and
     ``precise_fixation`` from the eye monitor.
+
+    ``trial_id`` is required and is not part of the outcome: it addresses the
+    message. The report comes from another machine over a network, and a report
+    that arrives late or twice must be refused rather than attributed to the
+    trial after the one it belongs to.
     """
 
+    trial_id: int = Field(
+        ge=0,
+        description=(
+            "Which trial this is the outcome of. Refused with 409 if it is not "
+            "the trial in flight."
+        ),
+    )
     outcome: TrialOutcome
     manipulandum: Manipulandum = Manipulandum.NONE
     reaction_time_ms: float | None = None
@@ -446,7 +464,7 @@ class TrialSpecModel(Model):
     trial_type_number: int
     trial_type_name: str
     set_name: str
-    time_sequence: int
+    statemachine_graph: str
     reward_ms: int
     recording: bool
     paused: bool
@@ -528,7 +546,7 @@ class CounterRowModel(ResultCountModel):
     trial_type_number: int = Field(description="Extended by the set number when that is on.")
     name: str
     trials_per_round: int
-    time_sequence: int
+    statemachine_graph: str
     reward_ms: int
     p_next: float = Field(
         description=(
@@ -726,7 +744,7 @@ def counter_rows(
                 trial_type_number=number_offset + index,
                 name=trial_type.name,
                 trials_per_round=trial_type.trials_per_round,
-                time_sequence=trial_type.time_sequence,
+                statemachine_graph=trial_type.statemachine_graph,
                 reward_ms=trial_type.reward_ms,
                 p_next=state.p_next[index] if index < len(state.p_next) else 0.0,
             )

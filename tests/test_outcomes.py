@@ -23,7 +23,7 @@ def test_outcome_codes_are_the_tdr_wire_contract():
     assert TrialOutcome.EARLY == 5
     assert TrialOutcome.LATE == 6
     assert TrialOutcome.EYE_ERROR == 7
-    assert TrialOutcome.INEXPECTED_START_SIGNAL == 8
+    assert TrialOutcome.UNEXPECTED_START_SIGNAL == 8
     assert TrialOutcome.WRONG_START_SIGNAL == 9
     assert TrialOutcome.CANCELLED == 10
 
@@ -35,7 +35,7 @@ def test_vstim_defaults():
     assert policy.accepts(report(TrialOutcome.LATE))
     # Off by default in VStim, and deliberately so.
     assert not policy.accepts(report(TrialOutcome.NOT_STARTED))
-    assert not policy.accepts(report(TrialOutcome.INEXPECTED_START_SIGNAL))
+    assert not policy.accepts(report(TrialOutcome.UNEXPECTED_START_SIGNAL))
     assert not policy.accepts(report(TrialOutcome.WRONG_START_SIGNAL))
     assert not policy.accepts(report(TrialOutcome.CANCELLED))
 

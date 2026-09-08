@@ -65,6 +65,7 @@ to learn them.
 
 | Field | Type | Meaning |
 |---|---|---|
+| `trial_id` | int | **Required.** Which trial this is the outcome of. `409` if it is not the trial in flight. |
 | `outcome` | int or name | The `.tdr` code. `1` and `"HIT"` are both accepted; always returned as the code. |
 | `manipulandum` | int or name | Which input device produced it. |
 | `reaction_time_ms` | float? | Recorded, never used in the accept decision. |
@@ -76,11 +77,19 @@ to learn them.
 | `simulated` | bool | The outcome came from a simulator, not an animal. |
 | `note` | str? | Free text, recorded verbatim. |
 
+`trial_id` addresses the message; it is not part of the outcome and is not
+written into the record, which already carries the trial's number. It is required
+rather than defaulted, and an outcome for any other trial is **refused** rather
+than accepted: the report comes from another machine over a network, and one that
+arrives late or twice would otherwise be attributed to the trial *after* the one
+it belongs to. triald cannot tell which of the two is the truth, so it takes
+neither.
+
 The eleven outcome codes are a **wire contract**: they are in every `.tdr` the lab
 has written and every analysis script that reads one, and are never renumbered.
 
 ```
--1 UNDETERMINED   2 WRONG_RESPONSE        5 EARLY   8 INEXPECTED_START_SIGNAL
+-1 UNDETERMINED   2 WRONG_RESPONSE        5 EARLY   8 UNEXPECTED_START_SIGNAL
  0 NOT_STARTED    3 EARLY_HIT             6 LATE    9 WRONG_START_SIGNAL
  1 HIT            4 EARLY_WRONG_RESPONSE  7 EYE_ERROR  10 CANCELLED
 ```
@@ -114,7 +123,7 @@ switch rule, because the rule travels with the set: through the store, through
 {
   "name": "fixation",
   "trial_types": [
-    { "name": "fix_only", "trials_per_round": 4, "time_sequence": 0,
+    { "name": "fix_only", "trials_per_round": 4, "statemachine_graph": "fixation",
       "reward_ms": 120, "params": {} }
   ],
   "switch_rule": { "enabled": true, "criterion": "hits",
@@ -129,6 +138,20 @@ are discrete *conditions*, and the intensity has to live somewhere.
 
 `target` is a set **name**, not a 1-based index into a fixed array. An
 index-based rule points somewhere else the moment sets are reordered.
+
+`statemachine_graph` is the state graph the executor runs for this condition, and it is a
+**name** for the same reason — VStim's `iTimeSequence` was an index into a fixed
+store, so editing sequence 3 silently changed the meaning of every trial type
+pointing at it. Empty means "leave whatever the executor has loaded". triald
+holds no graphs and does not check the name against a store: the executor owns
+them and refuses one it does not have. It is the only field of the trial type
+that crosses to an executor, and it is still not the trial type — several
+conditions routinely share one graph.
+
+The name is spelled out because a bare `graph` says nothing about whose it is —
+triald holds none of its own. On statemachined's `POST /api/trial/configure` the
+same value is the field `graph`, where the namespace supplies the rest; a client
+maps the one field.
 
 ---
 
@@ -153,7 +176,7 @@ definition already joined onto its tallies — the columns VStim's Trial Type
 Manager shows, so a client does not have to match the two up itself:
 
 ```
-index · trial_type_number · name · trials_per_round · time_sequence · reward_ms
+index · trial_type_number · name · trials_per_round · statemachine_graph · reward_ms
 remaining · p_next · total · accepted · frame_loss · by_outcome{} · hits · hit_rate
 ```
 
@@ -172,7 +195,7 @@ somebody pauses in the middle of it.
 
 ```
 trial_number · trial_type_index · trial_type_number · trial_type_name
-set_name · time_sequence · reward_ms · recording · paused · started_at
+set_name · statemachine_graph · reward_ms · recording · paused · started_at
 ```
 
 ### `TrialRecord` — one finished trial

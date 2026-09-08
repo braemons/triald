@@ -250,7 +250,7 @@ class SessionService:
     def report_outcome(self, report: sc.OutcomeReportModel) -> sc.TrialRecordModel:
         session = self.require_running()
         try:
-            record = session.report_outcome(report.build())
+            record = session.report_outcome(report.build(), trial_id=report.trial_id)
         except SessionError as exc:
             raise ServiceError(str(exc), kind="session") from exc
         except RecordingError as exc:

@@ -55,7 +55,13 @@ def run_trial(session: Session, source: BehaviourSource) -> TrialRecord:
     if isinstance(source, SimulatedBehaviourSource):
         source.set_current_trial(spec)
 
-    source.arm(TrialParameters(trial_id=spec.trial_number, reward_ms=spec.reward_ms))
+    source.arm(
+        TrialParameters(
+            trial_id=spec.trial_number,
+            statemachine_graph=spec.statemachine_graph,
+            reward_ms=spec.reward_ms,
+        )
+    )
     report = source.result(spec.trial_number)
     return session.report_outcome(report)
 

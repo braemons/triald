@@ -40,7 +40,13 @@ class TrialSpec:
 
     trial_type_name: str
     set_name: str
-    time_sequence: int
+
+    statemachine_graph: str
+    """Name of the state graph this trial runs, latched from the trial type.
+
+    A name rather than an index, so the record says which graph actually ran
+    rather than a number into a store that has since been edited."""
+
     reward_ms: int
 
     recording: bool
@@ -59,7 +65,7 @@ class TrialSpec:
             "trial_type_number": self.trial_type_number,
             "trial_type_name": self.trial_type_name,
             "set_name": self.set_name,
-            "time_sequence": self.time_sequence,
+            "statemachine_graph": self.statemachine_graph,
             "reward_ms": self.reward_ms,
             "recording": self.recording,
             "paused": self.paused,

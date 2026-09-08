@@ -78,6 +78,12 @@ reaching for anything else.
   TrialsBeforeStop`, which silently never fires again if a counter jumps.
 - **Sets are addressed by name**, not by a 1-based index into a fixed array. An
   index-based rule points somewhere else the moment sets are reordered.
+- **The state graph is named, not indexed.** `TrialType.statemachine_graph` is the one field
+  of a condition that crosses to an executor, and it carries a name because an
+  index points at a different machine the moment the executor's store is
+  edited — the disease sets were cured of. It also means the record says which
+  graph ran rather than a number into a file since changed. triald holds no
+  graphs and validates nothing; the executor refuses a name it does not have.
 - **A sequence is a chain of per-set rules**, not a separate type. Two sets
   pointing at each other alternate; three walk in order; a set with no rule ends
   the walk.
@@ -101,7 +107,11 @@ reaching for anything else.
   shape of the rig*.
 - **`trial_id` on every behaviour-source message.** It is what stops a late
   result being attributed to the next trial, which is how a rig quietly
-  mislabels a dataset.
+  mislabels a dataset. `OutcomeReportModel.trial_id` is required and an outcome
+  for any other trial is refused with 409 — never accepted, because triald
+  cannot tell which of the two reports is the truth. It addresses the message
+  and is not part of `OutcomeReport` itself: the record already carries the
+  trial's number, and duplicating it would let the two disagree.
 - **Records are evidence; the manifest is a header.** Trials and events are
   append-only and never rewritten — a correction is a new event, so the record
   shows both what was believed and when it changed. Custom payloads are checked

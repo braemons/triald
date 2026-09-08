@@ -103,7 +103,7 @@ const OUTCOME_COLUMNS = [
   ["LATE", "Late", "Responded after the window closed"],
   ["EYE_ERROR", "Eye", "Gaze left the fixation window"],
   ["NOT_STARTED", "NoStart", "A start signal was required and never given"],
-  ["INEXPECTED_START_SIGNAL", "Inexp", "Start signal in an interval that is not a start interval"],
+  ["UNEXPECTED_START_SIGNAL", "Unexp", "Start signal in an interval that is not a start interval"],
   ["WRONG_START_SIGNAL", "WrgStrt", "The wrong start signal was given"],
   ["CANCELLED", "Canc", "Aborted by the experimenter"],
 ];
@@ -118,7 +118,7 @@ const OUTCOMES = [
   ["LATE", 6],
   ["EYE_ERROR", 7],
   ["NOT_STARTED", 0],
-  ["INEXPECTED_START_SIGNAL", 8],
+  ["UNEXPECTED_START_SIGNAL", 8],
   ["WRONG_START_SIGNAL", 9],
 ];
 
@@ -146,7 +146,7 @@ const ACCEPT_FIELDS = [
   ["late", "Late"],
   ["eye_error", "Eye error"],
   ["not_started", "Not started"],
-  ["inexpected_start_signal", "Inexp. start"],
+  ["unexpected_start_signal", "Unexp. start"],
   ["wrong_start_signal", "Wrong start"],
   ["cancelled", "Cancelled"],
 ];
@@ -192,7 +192,7 @@ function renderCurrent() {
   if (trial) {
     el.textContent =
       `trial ${trial.trial_number} · ${trial.set_name} / ${trial.trial_type_name || `#${trial.trial_type_index}`}\n` +
-      `no. ${trial.trial_type_number} · seq ${trial.time_sequence} · ${trial.reward_ms} ms` +
+      `no. ${trial.trial_type_number}${trial.statemachine_graph ? ` · ${trial.statemachine_graph}` : ""} · ${trial.reward_ms} ms` +
       (trial.recording ? " · recording" : trial.paused ? " · pausing" : "");
     return;
   }
@@ -233,7 +233,7 @@ function renderCounters() {
     th("No.", "left") +
     th("Trial type", "left name") +
     th("#Trials", "", "Weight: how many of this type make one round") +
-    th("Seq", "", "Time sequence index") +
+    th("Graph", "", "Name of the state graph this type runs") +
     th("Rew", "", "Reward the type is worth, in ms") +
     th("Remain", "sep", "Still to run in the round or experiment") +
     th("P(next)", "", "Chance of being drawn next by the ordering") +
@@ -249,7 +249,7 @@ function renderCounters() {
         td(extended ? row.trial_type_number : row.index, "left"),
         td(row.name || `type ${row.index}`, "left name"),
         td(row.trials_per_round),
-        td(row.time_sequence),
+        td(row.statemachine_graph || "–", "left"),
         td(row.reward_ms),
         td(row.remaining, "sep"),
         `<td class="p-next">${row.p_next > 0 ? pct(row.p_next) : "–"}</td>`,
@@ -490,6 +490,8 @@ function wire() {
   for (const button of document.querySelectorAll("[data-outcome]")) {
     button.onclick = () =>
       send("POST", "/api/trial/outcome", {
+        // The daemon refuses an outcome for any trial but the one in flight.
+        trial_id: state?.current?.trial_number ?? 0,
         outcome: button.dataset.outcome,
         manipulandum: "SIMULATED",
         // Both modifiers can veto an otherwise accepted outcome on their own,

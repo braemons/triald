@@ -50,7 +50,7 @@ class TrialOutcome(enum.IntEnum):
     EYE_ERROR = 7
     """Gaze left the fixation window."""
 
-    INEXPECTED_START_SIGNAL = 8
+    UNEXPECTED_START_SIGNAL = 8
     """Start signal arrived in an interval that is not a start interval."""
 
     WRONG_START_SIGNAL = 9
@@ -155,7 +155,7 @@ class AcceptancePolicy:
     early: bool = True
     late: bool = True
     eye_error: bool = True
-    inexpected_start_signal: bool = False
+    unexpected_start_signal: bool = False
     wrong_start_signal: bool = False
     cancelled: bool = False
 
@@ -174,7 +174,7 @@ class AcceptancePolicy:
         TrialOutcome.EARLY: "early",
         TrialOutcome.LATE: "late",
         TrialOutcome.EYE_ERROR: "eye_error",
-        TrialOutcome.INEXPECTED_START_SIGNAL: "inexpected_start_signal",
+        TrialOutcome.UNEXPECTED_START_SIGNAL: "unexpected_start_signal",
         TrialOutcome.WRONG_START_SIGNAL: "wrong_start_signal",
         TrialOutcome.CANCELLED: "cancelled",
     }

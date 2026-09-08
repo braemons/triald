@@ -71,6 +71,13 @@ def client(service: SessionService) -> TestClient:
         yield client
 
 
+def next_trial(client: TestClient) -> int:
+    """Select a trial and give its number, which its outcome has to carry."""
+    response = client.post("/api/trial/next")
+    assert response.status_code == 200, response.text
+    return response.json()["trial_number"]
+
+
 def arm(client: TestClient) -> dict:
     response = client.post("/api/session/arm")
     assert response.status_code == 200, response.text
@@ -122,7 +129,7 @@ def test_a_trial_can_be_selected_and_reported(client: TestClient):
     assert spec["trial_number"] == 1
     assert spec["set_name"] == "easy"
 
-    record = client.post("/api/trial/outcome", json={"outcome": "HIT"}).json()
+    record = client.post("/api/trial/outcome", json={"trial_id": 1, "outcome": "HIT"}).json()
     assert record["outcome"]["code"] == 1
     assert record["accepted"] is True
     assert record["refusal_reason"] is None
@@ -130,17 +137,50 @@ def test_a_trial_can_be_selected_and_reported(client: TestClient):
 
 def test_an_outcome_may_be_given_by_code_or_by_name(client: TestClient):
     arm(client)
-    client.post("/api/trial/next")
-    by_name = client.post("/api/trial/outcome", json={"outcome": "EYE_ERROR"}).json()
-    client.post("/api/trial/next")
-    by_code = client.post("/api/trial/outcome", json={"outcome": 7}).json()
+    trial = next_trial(client)
+    by_name = client.post(
+        "/api/trial/outcome", json={"trial_id": trial, "outcome": "EYE_ERROR"}
+    ).json()
+    trial = next_trial(client)
+    by_code = client.post("/api/trial/outcome", json={"trial_id": trial, "outcome": 7}).json()
     assert by_name["outcome"]["code"] == by_code["outcome"]["code"] == 7
+
+
+def test_an_outcome_for_another_trial_is_refused(client: TestClient):
+    # The failure this exists to stop: a report that arrives late is attributed
+    # to the trial *after* the one it belongs to, and the dataset is quietly
+    # mislabelled. Refusing is the only safe answer - triald cannot know whether
+    # the late one or the current one is the truth.
+    arm(client)
+    trial = next_trial(client)
+
+    response = client.post("/api/trial/outcome", json={"trial_id": trial - 1, "outcome": "HIT"})
+    assert response.status_code == 409
+    assert f"trial {trial} is the one in flight" in response.json()["detail"]
+
+    # And the refused report changed nothing: the trial is still in flight.
+    state = client.get("/api/state").json()
+    assert state["current"]["trial_number"] == trial
+    assert state["totals"]["total"] == 0
+
+
+def test_an_outcome_without_a_trial_id_is_refused(client: TestClient):
+    # Required, not defaulted. A default would make the check silently optional
+    # for exactly the caller that needs it - the one on the far end of a wire.
+    arm(client)
+    next_trial(client)
+
+    response = client.post("/api/trial/outcome", json={"outcome": "HIT"})
+    assert response.status_code == 422
+    assert "trial_id" in response.text
 
 
 def test_an_unknown_outcome_name_is_refused_with_the_alternatives(client: TestClient):
     arm(client)
-    client.post("/api/trial/next")
-    response = client.post("/api/trial/outcome", json={"outcome": "SPLENDID"})
+    trial = next_trial(client)
+    response = client.post(
+        "/api/trial/outcome", json={"trial_id": trial, "outcome": "SPLENDID"}
+    )
     assert response.status_code == 422
     assert "HIT" in response.text
 
@@ -167,10 +207,10 @@ def test_frame_loss_vetoes_an_otherwise_accepted_hit(client: TestClient):
     """A hit that lost a frame is still a hit: counted, but not accepted."""
     arm(client)
     client.patch("/api/config", json={"acceptance": {"frame_loss": False}})
-    client.post("/api/trial/next")
+    trial = next_trial(client)
     record = client.post(
         "/api/trial/outcome",
-        json={"outcome": "HIT", "frame_loss": {"interval": 1, "frame": 6}},
+        json={"trial_id": trial, "outcome": "HIT", "frame_loss": {"interval": 1, "frame": 6}},
     ).json()
 
     assert record["accepted"] is False
@@ -185,9 +225,10 @@ def test_frame_loss_vetoes_an_otherwise_accepted_hit(client: TestClient):
 def test_imprecise_fixation_vetoes_on_its_own(client: TestClient):
     arm(client)
     client.patch("/api/config", json={"acceptance": {"imprecise_fixation": False}})
-    client.post("/api/trial/next")
+    trial = next_trial(client)
     record = client.post(
-        "/api/trial/outcome", json={"outcome": "HIT", "precise_fixation": False}
+        "/api/trial/outcome",
+        json={"trial_id": trial, "outcome": "HIT", "precise_fixation": False},
     ).json()
     assert record["accepted"] is False
     assert "imprecise fixation" in record["refusal_reason"]
@@ -255,8 +296,10 @@ def test_the_accept_flags_take_effect_on_the_next_trial(client: TestClient):
     assert result["changed"] == ["acceptance"]
     assert result["bag_rebuilt"] is False
 
-    client.post("/api/trial/next")
-    record = client.post("/api/trial/outcome", json={"outcome": "EYE_ERROR"}).json()
+    trial = next_trial(client)
+    record = client.post(
+        "/api/trial/outcome", json={"trial_id": trial, "outcome": "EYE_ERROR"}
+    ).json()
     assert record["accepted"] is False
 
 
@@ -382,6 +425,35 @@ def test_a_set_is_replaced_in_place_keeping_its_number(client: TestClient):
     easy = next(s for s in body["sets"] if s["name"] == "easy")
     assert easy["set_number"] == 1
     assert easy["trials_per_round"] == 6
+
+
+def test_a_graph_name_survives_the_round_trip(client: TestClient):
+    # The graph is named on the wire, never indexed, and the counters table is
+    # where the UI reads it back.
+    arm(client)
+    client.put(
+        "/api/sets/easy",
+        json={
+            "name": "easy",
+            "trial_types": [
+                {"name": "easy_a", "trials_per_round": 1, "statemachine_graph": "detection"},
+                {
+                    "name": "easy_b",
+                    "trials_per_round": 1,
+                    "statemachine_graph": "discrimination",
+                },
+            ],
+            "switch_rule": {"enabled": False},
+        },
+    )
+    state = client.get("/api/state").json()
+    assert [row["statemachine_graph"] for row in state["counters"]] == [
+        "detection",
+        "discrimination",
+    ]
+
+    spec = client.post("/api/trial/next").json()
+    assert spec["statemachine_graph"] in {"detection", "discrimination"}
 
 
 def test_the_path_and_the_body_have_to_agree_about_the_name(client: TestClient):

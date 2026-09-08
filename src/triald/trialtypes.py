@@ -1,7 +1,7 @@
 """Trial types, the sets they live in, and the rule for leaving a set.
 
 A **trial type** is one condition: a name, how often it should run in a round, the
-time sequence it uses, and how much reward it is worth. A **set** is a named
+state graph it runs, and how much reward it is worth. A **set** is a named
 collection of them plus the rule for when to move on to another set.
 
 The switch rule belongs to the set rather than to the session because it travels
@@ -62,8 +62,28 @@ class TrialType:
     trials_per_round: int = 0
     """Weight: how many of this type make up one round. Zero means unused."""
 
-    time_sequence: int = 0
-    """Index of the time sequence this type runs with."""
+    statemachine_graph: str = ""
+    """Name of the state graph this type runs with. Empty means whatever the
+    executor already has loaded.
+
+    A **name**, never an index. VStim's ``iTimeSequence`` was an index into a
+    fixed store and had exactly the disease the set switch rules had before
+    #239: edit sequence 3 and every trial type pointing at it silently changes
+    meaning. Sets were cured by naming them; this is the same cure. It also
+    means the record says which graph actually ran rather than a number into a
+    file that has since been edited.
+
+    triald does not hold graphs and does not validate this against a store -
+    the executor that runs the trial owns them (statemachined's graph store),
+    and it refuses a name it does not have. Interaction A in the contracts
+    repo.
+
+    Spelled out rather than left as ``graph`` because in triald's vocabulary a
+    bare "graph" says nothing about whose it is: triald has none of its own, and
+    the reader of a trial type needs to know this names a state machine
+    somewhere else. On statemachined's own wire the field is ``graph`` - there
+    the namespace supplies what the name here has to carry.
+    """
 
     reward_ms: int = 0
     """Reward the type is worth. What is actually delivered is reported back."""

@@ -136,6 +136,35 @@ def test_recording_is_latched_at_selection():
     assert spec.recording  # the latched value did not move
 
 
+def test_the_graph_name_is_latched_from_the_trial_type():
+    # The graph is a name, not a slot: what the record carries has to be the
+    # thing an executor was asked for, not an index into a store that can be
+    # edited between sessions.
+    store = TrialTypeStore(
+        [
+            TrialTypeSet(
+                name="main",
+                trial_types=[
+                    TrialType(name="go", trials_per_round=1, statemachine_graph="detection"),
+                    TrialType(name="catch", trials_per_round=1, statemachine_graph="detection"),
+                ],
+            )
+        ]
+    )
+    session = make_session(store)
+
+    spec = session.next_trial()
+    assert spec.statemachine_graph == "detection"
+    assert spec.as_dict()["statemachine_graph"] == "detection"
+
+
+def test_a_trial_type_with_no_graph_names_none():
+    # An empty name means "leave whatever the executor has loaded" - the desk
+    # case, and the one every existing set is in.
+    session = make_session()
+    assert session.next_trial().statemachine_graph == ""
+
+
 # -- counted versus accepted ----------------------------------------------------
 
 
