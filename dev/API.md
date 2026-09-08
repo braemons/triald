@@ -85,14 +85,20 @@ arrives late or twice would otherwise be attributed to the trial *after* the one
 it belongs to. triald cannot tell which of the two is the truth, so it takes
 neither.
 
-The eleven outcome codes are a **wire contract**: they are in every `.tdr` the lab
-has written and every analysis script that reads one, and are never renumbered.
+The outcome codes are a **wire contract**: they are in every `.tdr` the lab has
+written and every analysis script that reads one, and are never renumbered.
 
 ```
 -1 UNDETERMINED   2 WRONG_RESPONSE        5 EARLY   8 UNEXPECTED_START_SIGNAL
  0 NOT_STARTED    3 EARLY_HIT             6 LATE    9 WRONG_START_SIGNAL
  1 HIT            4 EARLY_WRONG_RESPONSE  7 EYE_ERROR  10 CANCELLED
+                                                       11 NEVER_FINISHED
 ```
+
+`NEVER_FINISHED` (11) is the first code that is not VStim's, and **the only one
+triald assigns to itself** — nothing sends it. Everything else is a verdict from
+whoever watched the animal; this one is triald recording that no verdict arrived
+before the trial's `trial_cap_ms` expired. See *The trial deadline* below.
 
 ### `SessionConfig` / `ConfigPatch` — the declarative settings
 
@@ -107,11 +113,39 @@ value meaning "no limit" — clear it by sending `0`.
 | `ordering` | One of the five below. |
 | `rounds` | Rounds in an experiment. Round = the sum of the weights. |
 | `avoid_repeat` | Exclude the previous type from the draw, while anything else is left. |
-| `acceptance` | The eleven accept flags plus the two vetoes. |
+| `acceptance` | The per-outcome accept flags plus the two vetoes. |
 | `stop_when_rounds_done` | Stop after the last trial of the last round. |
 | `stop_after_trials` + `stop_criterion` | Stop after N trials of a chosen kind. |
 | `extend_trial_type_number` | Number trial types `set_number * 256 + index`. |
 | `seed` | RNG seed. Generated and recorded when null, so every session replays. |
+| `trial_cap_ms` | How long a trial may take before triald gives up on it. `0` disables. |
+
+### The trial deadline
+
+**Nobody is responsible for delivering an outcome, and that is deliberate.** An
+executor publishes what it observed and assumes nobody read it, because it
+cannot know whether a consumer exists, or should, or is running a session. So
+**only triald can tell "not yet" from "never"** — and without a deadline a
+subscription that dies is a session that quietly stops, with no error anywhere
+and a trial number nobody can account for months later.
+
+`trial_cap_ms` is that deadline, and it is a **watchdog, not a paradigm
+parameter**: set it to the longest a trial could honestly take on the rig, not
+to the typical one. It is the same number that goes to an executor as its own
+wall-clock cap. Every trial type shares it on purpose — a per-condition cap
+invites tuning, and a cap tuned close to a real trial's length turns a slow rig
+into a data-losing one. `0` means no deadline, which is right for the simulator
+(a simulated outcome is synchronous and can never be late).
+
+The deadline is **latched at selection** and published on `TrialSpec.deadline`,
+so the record says what the trial was allowed to take. Changing `trial_cap_ms`
+mid-session affects the next trial, never the one in flight.
+
+When it passes, the trial is **recorded** as `NEVER_FINISHED` rather than
+dropped — a gap in the numbering is a thing somebody has to explain later, and
+this explains itself. It is never accepted by default, so it consumes nothing
+from the round and moves no stop rule or set switch. The session carries on: a
+dead executor costs one trial, not the session.
 
 ### `TrialTypeSet` — a set and its switch rule
 

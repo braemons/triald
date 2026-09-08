@@ -64,6 +64,26 @@ class SessionConfig:
 
     acceptance: AcceptancePolicy = dataclasses.field(default_factory=AcceptancePolicy)
 
+    trial_cap_ms: int = 0
+    """How long a trial may take before triald gives up on hearing about it.
+
+    A **watchdog, not a paradigm parameter.** Nobody is responsible for
+    delivering an outcome: an executor publishes what it saw and assumes nobody
+    read it, which is the only thing it can honestly promise. So only triald can
+    tell "not yet" from "never", and without this a subscription that dies is a
+    session that quietly stops with no error anywhere.
+
+    Set it to the longest a trial could honestly take on this rig, not to the
+    typical one - it is the same number that goes to the executor as its own
+    wall-clock cap. Every trial type shares it, deliberately: a per-condition
+    cap would invite tuning it, and a cap tuned close to a real trial's length
+    turns a slow rig into a data-losing one.
+
+    Zero means no deadline, which is right for the simulator - a simulated
+    outcome is synchronous and can never be late - and for a desk session
+    somebody is watching. See the contracts repo, INTERACTIONS.md §9.7.
+    """
+
     stop_when_rounds_done: bool = False
     """Stop after the last trial of the last round. VStim's ``m_StopIfDone``."""
 
@@ -237,6 +257,8 @@ class Session:
         self._trial_number += 1
         trial_type = self._set[index]
         paused = self._paused
+        started_at = self._clock()
+        cap = self._config.trial_cap_ms
 
         self._current = TrialSpec(
             trial_number=self._trial_number,
@@ -248,7 +270,8 @@ class Session:
             reward_ms=trial_type.reward_ms,
             recording=self._recording and not paused,
             paused=paused,
-            started_at=self._clock(),
+            started_at=started_at,
+            deadline=(None if cap <= 0 else started_at + dt.timedelta(milliseconds=cap)),
         )
         return self._current
 
@@ -386,6 +409,59 @@ class Session:
                 outcome=TrialOutcome.CANCELLED,
                 manipulandum=Manipulandum.NONE,
                 note=reason,
+            )
+        )
+
+    def overdue(self) -> bool:
+        """Whether the trial in flight has passed its deadline.
+
+        False when there is no trial, and false when there is no deadline: a
+        session with no cap waits for ever on purpose.
+        """
+        current = self._current
+        return (
+            current is not None
+            and current.deadline is not None
+            and self._clock() >= current.deadline
+        )
+
+    def expire_overdue_trial(self) -> TrialRecord | None:
+        """End an overdue trial as :attr:`TrialOutcome.NEVER_FINISHED`, or do nothing.
+
+        **This is triald noticing for itself, because nobody else can.** An
+        executor publishes what it saw and assumes nobody read it - which is all
+        it can honestly promise, since it cannot know whether a consumer exists
+        or is running a session. So nothing is responsible for delivering an
+        outcome, and only the side that is waiting can tell "not yet" from
+        "never". Without this, a subscription that dies is a session that stops
+        with no error anywhere and nothing in the record to say why.
+
+        Recorded rather than dropped, for the same reason a cancellation is: a
+        gap in the trial numbering is a thing somebody has to explain months
+        later, and `NEVER_FINISHED` explains itself. It is never accepted, so it
+        consumes nothing from the round and moves no stop rule.
+
+        Safe to call on a timer, from anywhere, as often as you like: it is a
+        no-op unless a trial is in flight *and* past its deadline. The clock is
+        the session's injected one, so a test moves it rather than sleeping.
+
+        Returns:
+            The record, or None if there was nothing overdue.
+        """
+        if not self.overdue():
+            return None
+
+        assert self._current is not None  # overdue() checked it
+        waited = self._clock() - self._current.started_at
+        return self.report_outcome(
+            OutcomeReport(
+                outcome=TrialOutcome.NEVER_FINISHED,
+                manipulandum=Manipulandum.NONE,
+                note=(
+                    f"nothing reported how trial {self._current.trial_number} ended "
+                    f"within its {self._config.trial_cap_ms} ms cap "
+                    f"(waited {waited.total_seconds():.1f} s)"
+                ),
             )
         )
 

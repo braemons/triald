@@ -108,6 +108,7 @@ const OUTCOME_COLUMNS = [
   ["UNEXPECTED_START_SIGNAL", "Unexp", "Start signal in an interval that is not a start interval"],
   ["WRONG_START_SIGNAL", "WrgStrt", "The wrong start signal was given"],
   ["CANCELLED", "Canc", "Aborted by the experimenter"],
+  ["NEVER_FINISHED", "NoRep", "Started, and nothing ever said how it ended"],
 ];
 
 /** Outcome buttons for driving one trial by hand, with their .tdr codes. */
@@ -122,6 +123,8 @@ const OUTCOMES = [
   ["NOT_STARTED", 0],
   ["UNEXPECTED_START_SIGNAL", 8],
   ["WRONG_START_SIGNAL", 9],
+  // Not offered as a button: it is triald's own verdict that nothing reported
+  // the trial, so a person clicking it would be reporting that nobody reported.
 ];
 
 const ORDERINGS = [
@@ -151,6 +154,7 @@ const ACCEPT_FIELDS = [
   ["unexpected_start_signal", "Unexp. start"],
   ["wrong_start_signal", "Wrong start"],
   ["cancelled", "Cancelled"],
+  ["never_finished", "Never finished"],
 ];
 
 const SIM_FIELDS = [

@@ -60,6 +60,32 @@ class TrialOutcome(enum.IntEnum):
     CANCELLED = 10
     """Aborted by the experimenter."""
 
+    NEVER_FINISHED = 11
+    """The trial was started and nothing ever said how it ended.
+
+    **The first code that is not VStim's**, and the only one triald assigns to
+    itself. Everything above is a verdict from whoever watched the animal;
+    this one is triald recording that no verdict arrived before the trial's
+    wall-clock cap expired - an executor that crashed, a subscription that
+    died, a rig somebody unplugged mid-session.
+
+    Named for what is *known* rather than for the timer that noticed. triald
+    has no idea what the animal did, and codes that guess would be worse than
+    one that does not: `CANCELLED` claims the experimenter stopped it,
+    `NOT_STARTED` claims the subject did nothing, and `UNDETERMINED` is the
+    value a trial holds *while* it runs, so a record full of them could not be
+    told from a session still in flight.
+
+    It exists because nobody is responsible for delivering an outcome. An
+    executor publishes what it saw and assumes nobody read it, which is the only
+    thing it can honestly promise - so **only the side that is waiting can tell
+    "not yet" from "never"**, and a session that quietly stopped with no error
+    anywhere was the alternative. See the contracts repo, INTERACTIONS.md §9.7.
+
+    Never accepted: it consumes nothing from the round, and a trial nobody
+    observed must not count towards a stop rule or a set switch.
+    """
+
 
 class Manipulandum(enum.IntEnum):
     """Which input device produced the outcome. Mirrors ``TDR::Manipulandum``."""
@@ -159,6 +185,7 @@ class AcceptancePolicy:
     unexpected_start_signal: bool = False
     wrong_start_signal: bool = False
     cancelled: bool = False
+    never_finished: bool = False
 
     frame_loss: bool = True
     """Accept a trial that also lost at least one frame."""
@@ -178,6 +205,7 @@ class AcceptancePolicy:
         TrialOutcome.UNEXPECTED_START_SIGNAL: "unexpected_start_signal",
         TrialOutcome.WRONG_START_SIGNAL: "wrong_start_signal",
         TrialOutcome.CANCELLED: "cancelled",
+        TrialOutcome.NEVER_FINISHED: "never_finished",
     }
 
     def accepts_outcome(self, outcome: TrialOutcome) -> bool:

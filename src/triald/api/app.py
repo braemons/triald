@@ -76,6 +76,9 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        # Nobody is responsible for delivering an outcome, so triald notices for
+        # itself when one stops arriving. See SessionService.start_watchdog.
+        await app.state.service.start_watchdog()
         yield
         await app.state.service.shutdown()
 

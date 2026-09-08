@@ -16,6 +16,8 @@ the same reason it is tested in ``test_session.py``.
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 pytest.importorskip("fastapi", reason="the API needs the 'serve' extra")
@@ -174,6 +176,62 @@ def test_an_outcome_without_a_trial_id_is_refused(client: TestClient):
     response = client.post("/api/trial/outcome", json={"outcome": "HIT"})
     assert response.status_code == 422
     assert "trial_id" in response.text
+
+
+def test_the_trial_cap_reaches_the_wire_and_shows_on_the_trial(client: TestClient):
+    # The deadline is published, because "why is this session full of
+    # NEVER_FINISHED" is answered by what the trial was allowed to take.
+    client.patch("/api/config", json={"trial_cap_ms": 4000})
+    arm(client)
+    spec = client.post("/api/trial/next").json()
+
+    assert client.get("/api/state").json()["config"]["trial_cap_ms"] == 4000
+    assert spec["deadline"] is not None
+    assert spec["deadline"] > spec["started_at"]
+
+
+def test_no_cap_means_no_deadline_on_the_wire(client: TestClient):
+    arm(client)
+    assert client.post("/api/trial/next").json()["deadline"] is None
+
+
+def test_never_finished_is_refused_by_default_and_can_be_accepted(client: TestClient):
+    # It is triald's own verdict that nothing reported the trial, so it consumes
+    # nothing from the round. The flag exists like the other ten, and a rig that
+    # wants such trials counted can say so.
+    assert client.get("/api/state").json()["config"]["acceptance"]["never_finished"] is False
+
+    result = client.patch("/api/config", json={"acceptance": {"never_finished": True}}).json()
+    assert result["changed"] == ["acceptance"]
+    assert client.get("/api/state").json()["config"]["acceptance"]["never_finished"] is True
+
+
+def test_the_watchdog_expires_a_trial_nobody_answers(client: TestClient):
+    """The whole point, through the real app: nothing reports the trial, and
+    triald ends it by itself rather than waiting for ever.
+
+    A short cap and the service's own interval, so this waits on the daemon
+    rather than on a sleep chosen to be long enough.
+    """
+    client.patch("/api/config", json={"trial_cap_ms": 1})
+    arm(client)
+    trial = next_trial(client)
+
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        state = client.get("/api/state").json()
+        if state["current"] is None:
+            break
+        time.sleep(0.05)
+
+    state = client.get("/api/state").json()
+    assert state["current"] is None, "the watchdog never fired"
+    assert state["last"]["trial"]["trial_number"] == trial
+    assert state["last"]["outcome"]["name"] == "NEVER_FINISHED"
+    assert state["last"]["outcome"]["code"] == 11
+    assert state["last"]["accepted"] is False
+    # And the session is still running: a dead executor costs one trial.
+    assert state["running"] is True
 
 
 def test_an_unknown_outcome_name_is_refused_with_the_alternatives(client: TestClient):

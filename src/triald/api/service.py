@@ -46,6 +46,11 @@ from triald.trialtypes import TRIAL_TYPES_PER_SET, TrialTypeStore
 
 log = logging.getLogger(__name__)
 
+#: How often the watchdog looks at the trial in flight. Coarse on purpose: it is
+#: guarding against a daemon that has stopped answering, not measuring anything,
+#: and a trial cap is seconds at least. See `SessionConfig.trial_cap_ms`.
+WATCHDOG_INTERVAL_SECONDS = 0.5
+
 #: How many state frames a slow subscriber may fall behind before frames are
 #: dropped. The stream is a *state* stream, not an event log: a subscriber that
 #: cannot keep up wants the newest snapshot, never a backlog of stale ones.
@@ -101,6 +106,7 @@ class SessionService:
         self._subscribers: set[asyncio.Queue[sc.StreamMessage]] = set()
         self._sequence = 0
         self._free_run: asyncio.Task[None] | None = None
+        self._watchdog: asyncio.Task[None] | None = None
         self._free_run_interval_ms = 250
 
     # -- building the pieces ----------------------------------------------------
@@ -348,8 +354,53 @@ class SessionService:
         finally:
             await self.publish()
 
+    # -- the watchdog -----------------------------------------------------------
+
+    async def start_watchdog(self) -> None:
+        """Begin checking whether the trial in flight has stopped being answered.
+
+        **Nobody is responsible for delivering an outcome**, and that is correct:
+        an executor publishes what it saw and assumes nobody read it, because it
+        cannot know whether a consumer exists or is running a session. So only
+        this side can tell "not yet" from "never", and without this a
+        subscription that dies is a session that quietly stops with no error
+        anywhere and nothing in the record to say why.
+
+        Cheap and unconditional: the check is a comparison against a latched
+        deadline, it does nothing when `trial_cap_ms` is zero, and it does
+        nothing when no trial is in flight. Started for the app's whole life
+        rather than per session, so there is no state saying whether it is
+        running.
+        """
+        if self._watchdog is None or self._watchdog.done():
+            self._watchdog = asyncio.create_task(self._watchdog_loop())
+
+    async def _watchdog_loop(self) -> None:
+        try:
+            while True:
+                await asyncio.sleep(WATCHDOG_INTERVAL_SECONDS)
+                try:
+                    record = self._session.expire_overdue_trial()
+                except Exception:
+                    # A watchdog that can kill the session it guards is worse
+                    # than none. There is an animal in the rig.
+                    log.exception("the trial watchdog failed")
+                    continue
+                if record is not None:
+                    log.error(
+                        "trial %d expired: %s", record.spec.trial_number, record.report.note
+                    )
+                    await self.publish()
+        except asyncio.CancelledError:
+            raise
+
     async def shutdown(self) -> None:
         await self._cancel_free_run()
+        task, self._watchdog = self._watchdog, None
+        if task is not None and not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
         self._close_recorder()
 
     # -- sets -------------------------------------------------------------------
