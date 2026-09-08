@@ -21,6 +21,11 @@ serve = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
     "pydantic>=2.9",
+    # The client for whatever runs a trial (api/statemachine_executor.py). Here
+    # rather than in the core so that triald.executor -- the contract and the
+    # translation of what an executor publishes -- imports nothing at all and is
+    # testable with dictionaries.
+    "httpx>=0.28",
 ]
 
 # Adaptive procedures beyond the up/down family in triald.adaptive. Never a hard

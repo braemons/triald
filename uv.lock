@@ -760,6 +760,7 @@ adaptive = [
 ]
 serve = [
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "pydantic" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -776,6 +777,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", marker = "extra == 'serve'", specifier = ">=0.115" },
+    { name = "httpx", marker = "extra == 'serve'", specifier = ">=0.28" },
     { name = "pydantic", marker = "extra == 'serve'", specifier = ">=2.9" },
     { name = "questplus", marker = "extra == 'adaptive'", specifier = ">=2023.1" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'serve'", specifier = ">=0.32" },
