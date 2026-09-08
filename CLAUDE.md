@@ -107,7 +107,11 @@ reaching for anything else.
   shape of the rig*.
 - **`trial_id` on every behaviour-source message.** It is what stops a late
   result being attributed to the next trial, which is how a rig quietly
-  mislabels a dataset.
+  mislabels a dataset. `OutcomeReportModel.trial_id` is required and an outcome
+  for any other trial is refused with 409 — never accepted, because triald
+  cannot tell which of the two reports is the truth. It addresses the message
+  and is not part of `OutcomeReport` itself: the record already carries the
+  trial's number, and duplicating it would let the two disagree.
 - **Records are evidence; the manifest is a header.** Trials and events are
   append-only and never rewritten — a correction is a new event, so the record
   shows both what was believed and when it changed. Custom payloads are checked

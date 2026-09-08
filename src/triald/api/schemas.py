@@ -336,8 +336,20 @@ class OutcomeReportModel(Model):
     participates in the accept decision has to be here, because the daemon has no
     other way to learn it: ``frame_loss`` comes from vstimd and
     ``precise_fixation`` from the eye monitor.
+
+    ``trial_id`` is required and is not part of the outcome: it addresses the
+    message. The report comes from another machine over a network, and a report
+    that arrives late or twice must be refused rather than attributed to the
+    trial after the one it belongs to.
     """
 
+    trial_id: int = Field(
+        ge=0,
+        description=(
+            "Which trial this is the outcome of. Refused with 409 if it is not "
+            "the trial in flight."
+        ),
+    )
     outcome: TrialOutcome
     manipulandum: Manipulandum = Manipulandum.NONE
     reaction_time_ms: float | None = None

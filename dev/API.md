@@ -65,6 +65,7 @@ to learn them.
 
 | Field | Type | Meaning |
 |---|---|---|
+| `trial_id` | int | **Required.** Which trial this is the outcome of. `409` if it is not the trial in flight. |
 | `outcome` | int or name | The `.tdr` code. `1` and `"HIT"` are both accepted; always returned as the code. |
 | `manipulandum` | int or name | Which input device produced it. |
 | `reaction_time_ms` | float? | Recorded, never used in the accept decision. |
@@ -75,6 +76,14 @@ to learn them.
 | `hit_condition` | bool | Whether the time sequence set a hit condition. |
 | `simulated` | bool | The outcome came from a simulator, not an animal. |
 | `note` | str? | Free text, recorded verbatim. |
+
+`trial_id` addresses the message; it is not part of the outcome and is not
+written into the record, which already carries the trial's number. It is required
+rather than defaulted, and an outcome for any other trial is **refused** rather
+than accepted: the report comes from another machine over a network, and one that
+arrives late or twice would otherwise be attributed to the trial *after* the one
+it belongs to. triald cannot tell which of the two is the truth, so it takes
+neither.
 
 The eleven outcome codes are a **wire contract**: they are in every `.tdr` the lab
 has written and every analysis script that reads one, and are never renumbered.

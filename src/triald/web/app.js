@@ -490,6 +490,8 @@ function wire() {
   for (const button of document.querySelectorAll("[data-outcome]")) {
     button.onclick = () =>
       send("POST", "/api/trial/outcome", {
+        // The daemon refuses an outcome for any trial but the one in flight.
+        trial_id: state?.current?.trial_number ?? 0,
         outcome: button.dataset.outcome,
         manipulandum: "SIMULATED",
         // Both modifiers can veto an otherwise accepted outcome on their own,
