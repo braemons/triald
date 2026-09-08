@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """What triald says to whatever runs a trial, and how it hears the answer.
 
 triald decides *which* trial runs; something else runs it. On a rig that

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Session metadata: who, what, which machines, and anything else a lab needs.
 
 A session record has to be readable years later by somebody who was not there.

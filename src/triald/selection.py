@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Choosing the next trial type.
 
 A round is a bag: each trial type contributes as many tokens as its

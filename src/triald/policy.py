@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The scripting surface: a policy is a Python class with optional hooks.
 
 The declarative config covers what VStim's dialogs cover - orderings, weights,

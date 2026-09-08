@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The scripting surface, and the rule that a policy bug never ends a session."""
 
 from __future__ import annotations

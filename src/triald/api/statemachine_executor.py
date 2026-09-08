@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Talking to a state-machine daemon: three calls out, and a stream back.
 
 The implementation of :class:`triald.executor.TrialExecutor` for a

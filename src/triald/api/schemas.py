@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The wire schema: every shape that crosses the API, in one place.
 
 **These models are the contract.** The web UI, the Python client, the MATLAB

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Adaptive procedures, built in so the common cases need no dependencies.
 
 A transformed up/down staircase is thirty lines and has no business pulling a

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Trial types, the sets they live in, and the rule for leaving a set.
 
 A **trial type** is one condition: a name, how often it should run in a round, the

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Where outcomes come from: a simulated subject, or whatever the rig reports.
 
 The daemon decides what runs; something else watches the animal and says what

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The bag: orderings, drawing without replacement, avoid-repeat, refilling."""
 
 from __future__ import annotations

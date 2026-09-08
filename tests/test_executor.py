@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Turning what an executor published into the report triald acts on.
 
 Dictionaries in, an `OutcomeReport` out. No network, no daemon, no device -- the

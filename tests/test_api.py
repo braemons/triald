@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The API: the wire shape, the routes, and the debug controls.
 
 Two things are worth stating about what is tested here.
