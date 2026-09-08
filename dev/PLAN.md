@@ -447,7 +447,7 @@ rig is not your laptop.
 1. write     my_staircase.py in your editor, under git
 2. check     trialctl policy check my_staircase.py   uploads, smoke-runs, discards
 3. load      trialctl policy load  my_staircase.py   uploads, stores, arms
-4. daemon    writes /var/lib/triald/policies/<sha256>.py, imports it,
+4. daemon    writes /var/lib/braemons/triald/policies/<sha256>.py, imports it,
              swaps it in at the next trial boundary — never mid-trial
 5. record    manifest.json carries the sha256 and a verbatim copy
 ```
@@ -555,7 +555,7 @@ misbehaved at trial 200 can say why from its own directory.
 Two configs, always named:
 
 - **rig config** — the physical setup: endpoints, results directory, serial port,
-  `policy_dir`, `extra_packages`. TOML at `/etc/braemons/triald.toml`. Changes
+  `policy_dir`, `extra_packages`. TOML at `/etc/braemons/triald-rig-config.toml`. Changes
   when the hardware does.
 - **session config** — one experiment: sets, ordering, accept flags, stop rules,
   policy. Changes per session.

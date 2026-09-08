@@ -203,8 +203,10 @@ and the `clock` argument to `Session` are the injection seams.
 `.deb` and `.rpm` from one `nfpm` config, with a vendored CPython at
 `/opt/braemons/triald` so the artifact does not care what Python the distribution
 ships. The systemd/sysusers/logrotate layout and the tag-derived versioning are
-lifted from vstimd. Config at `/etc/braemons/triald.toml`, state in
-`/var/lib/triald`.
+lifted from vstimd. The package is `braemons-triald` — the prefix is the
+archive's and nothing inside the package carries it. Config at
+`/etc/braemons/triald-rig-config.toml`, state in `/var/lib/braemons/triald`:
+both are the braemons convention, shared with vstimd and statemachined.
 
 numpy and scipy *are* in the package — without numpy, "scriptable in Python" is
 a hollow promise. **PsychoPy is not**, and must not be: it drags pyglet, wx and a

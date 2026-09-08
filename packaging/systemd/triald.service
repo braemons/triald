@@ -6,13 +6,16 @@ Wants=network-online.target
 
 [Service]
 Type=exec
-ExecStart=/opt/braemons/triald/bin/triald serve --config /etc/braemons/triald.toml
+ExecStart=/opt/braemons/triald/bin/triald serve --config /etc/braemons/triald-rig-config.toml
 User=triald
 Group=triald
 Restart=on-failure
 RestartSec=2
 
-StateDirectory=triald
+# /var/lib/braemons/triald, not /var/lib/triald: every braemons daemon keeps
+# its state under one directory, the way they share /etc/braemons -- so a rig's
+# state is one tree to back up, and vstimd's Samba share exports it whole.
+StateDirectory=braemons/triald
 StateDirectoryMode=0750
 
 # The daemon writes session records and reads policies; it has no business
@@ -21,7 +24,7 @@ ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
 NoNewPrivileges=yes
-ReadWritePaths=/var/lib/triald
+ReadWritePaths=/var/lib/braemons/triald
 
 [Install]
 WantedBy=multi-user.target

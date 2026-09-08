@@ -38,6 +38,20 @@ adaptive = ["questplus>=2023.1"]
 triald = "triald.cli:main"
 
 [dependency-groups]
+# Subscribing to a stimulus display's event stream
+# (api/stimulus_subscriber.py), and the three-daemon end-to-end test.
+#
+# **Optional, and that is load-bearing.** A rig with no display daemon runs
+# triald unchanged: `triald.stimulus` -- the join itself -- imports nothing and
+# is testable with integers, and `stimulus_subscriber` imports the client inside
+# a function so triald starts without it. Nothing in the session loop learns
+# whether a display exists.
+#
+# A group rather than an optional-dependency because vstimd is not on a package
+# registry, so a resolver asked to satisfy `triald[stimulus]` cannot. The same
+# reason and the same shape as statemachined's `e2e` group.
+stimulus = ["vstimd-client"]
+
 dev = [
     "pytest>=8.3",
     "pytest-cov>=6.0",
@@ -86,3 +100,9 @@ ignore = [
 
 [tool.ty.src]
 include = ["src"]
+
+[tool.uv.sources]
+# vstimd's Python client, from its repo: it is not published to a registry. The
+# pin is the 0.2 branch, which is where the event stream lives — 0.1 is released
+# and has no PUB socket at all.
+vstimd-client = { git = "https://github.com/braemons/vstimd.git", subdirectory = "client/python", branch = "0.2" }
