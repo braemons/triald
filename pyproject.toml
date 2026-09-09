@@ -26,6 +26,22 @@ serve = [
     # translation of what an executor publishes -- imports nothing at all and is
     # testable with dictionaries.
     "httpx>=0.28",
+    # statemachined's own client, from statemachined's own repository. triald
+    # used to carry a hand-written copy of that daemon's paths, refusal shape and
+    # stream rules; a second description of somebody else's API is right until
+    # the day it is not, and the day it is not is a session. Same move as
+    # `vstimd-client` below, same reason.
+    #
+    # **The base tier only, which is the whole point of it being tiered.** This
+    # pulls `statemachined.model` and `statemachined.client` -- pydantic, httpx,
+    # websockets -- and nothing else. Not pyserial: triald never opens a serial
+    # port, and `statemachined.device` is what would need one. Not fastapi or
+    # uvicorn: `statemachined[serve]` is the daemon, and triald talks to a
+    # daemon rather than being one. Depending on the distribution named
+    # `statemachined` is not depending on the daemon.
+    #
+    # LGPL, so importing it places nothing here under copyleft.
+    "statemachined",
 ]
 
 # Adaptive procedures beyond the up/down family in triald.adaptive. Never a hard
@@ -102,6 +118,13 @@ ignore = [
 include = ["src"]
 
 [tool.uv.sources]
+# statemachined's Python package, from its repo, for the same reason vstimd's
+# client is below: it is not on a package registry. `main` rather than a tag
+# while both sides are pre-release -- the client and the API it describes ship
+# from one commit, so a pin here would be a pin to a client older than the
+# daemon it is talking to.
+statemachined = { git = "https://github.com/braemons/statemachined.git", subdirectory = "python", branch = "main" }
+
 # vstimd's Python client, from its repo: it is not published to a registry. The
 # pin is the 0.2 branch, which is where the event stream lives — 0.1 is released
 # and has no PUB socket at all.
