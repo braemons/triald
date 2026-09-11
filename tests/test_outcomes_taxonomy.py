@@ -41,9 +41,11 @@ def test_the_enum_is_the_canonical_table():
 def test_the_counters_table_has_a_column_for_every_outcome_a_trial_can_carry():
     # Not UNDETERMINED: nobody assigns it, so the column would always read zero
     # and invite the question of what it meant.
-    app = (SOURCE / "web" / "app.js").read_text()
+    panel = (SOURCE / "web" / "elements" / "counters_panel_element.js").read_text()
     problems = check.countable_problems(
-        taxonomy(), "web/app.js OUTCOME_COLUMNS", check.javascript_names(app, "OUTCOME_COLUMNS")
+        taxonomy(),
+        "web/elements/counters_panel_element.js OUTCOME_COLUMNS",
+        check.javascript_names(panel, "OUTCOME_COLUMNS"),
     )
     assert not problems, "\n".join(problems)
 

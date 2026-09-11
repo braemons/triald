@@ -55,7 +55,7 @@ name = "cffi"
 version = "2.1.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pycparser", marker = "implementation_name != 'PyPy'" },
+    { name = "pycparser" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/9e/ef/008a1939e372c06329a3fce4279c02f328488f3526744906eeec3da7ad5f/cffi-2.1.1.tar.gz", hash = "sha256:dd31f52ea1086513bb9df30f8fcee9b8918323ae067a3d5b78bc826a000712be", size = 530807, upload-time = "2026-08-03T21:21:18.939Z" }
 wheels = [
@@ -916,6 +916,16 @@ wheels = [
 ]
 
 [[package]]
+name = "statemachined"
+version = "0.0.0"
+source = { git = "https://github.com/braemons/statemachined.git?subdirectory=python&branch=main#40b83461da9bbd84ebea9b0e4c9d1890efa8eea6" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "websockets" },
+]
+
+[[package]]
 name = "triald"
 version = "0.0.0"
 source = { editable = "." }
@@ -928,6 +938,7 @@ serve = [
     { name = "fastapi" },
     { name = "httpx" },
     { name = "pydantic" },
+    { name = "statemachined" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -949,6 +960,7 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'serve'", specifier = ">=0.28" },
     { name = "pydantic", marker = "extra == 'serve'", specifier = ">=2.9" },
     { name = "questplus", marker = "extra == 'adaptive'", specifier = ">=2023.1" },
+    { name = "statemachined", marker = "extra == 'serve'", git = "https://github.com/braemons/statemachined.git?subdirectory=python&branch=main" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'serve'", specifier = ">=0.32" },
 ]
 provides-extras = ["serve", "adaptive"]

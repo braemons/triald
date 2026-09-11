@@ -29,9 +29,9 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import APIRouter, FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi import APIRouter, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from triald.api import schemas as sc
 from triald.api.service import ServiceError, SessionService
@@ -41,6 +41,37 @@ from triald.trialtypes import TrialTypeStore
 log = logging.getLogger(__name__)
 
 WEB_ROOT = Path(__file__).resolve().parent.parent / "web"
+
+#: Enough to serve what this UI is made of, and no more. An unknown suffix is
+#: refused rather than served as a guess.
+_CONTENT_TYPE_BY_SUFFIX = {
+    ".html": "text/html; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".json": "application/json",
+    ".svg": "image/svg+xml",
+    ".ico": "image/x-icon",
+    ".png": "image/png",
+}
+
+#: **Nothing here is cached.** This daemon serves both the elements and the
+#: API they call, which is what keeps them the same version; a browser
+#: holding yesterday's `/elements/triald.js` against today's API -- or simply
+#: against yesterday's own set of panels -- would give that guarantee away
+#: for a few kilobytes. Matches statemachined's web_user_interface_routes.py,
+#: which the `/elements/` contract is specified against.
+_NO_CACHE_HEADERS = {"Cache-Control": "no-cache, must-revalidate"}
+
+
+def _read_asset(relative_path: str, root: Path) -> FileResponse:
+    candidate = (root / relative_path).resolve()
+    if not candidate.is_relative_to(root.resolve()) or not candidate.is_file():
+        raise HTTPException(404, f"no such file in the web UI: {relative_path!r}")
+    content_type = _CONTENT_TYPE_BY_SUFFIX.get(candidate.suffix)
+    if content_type is None:
+        raise HTTPException(404, f"{candidate.suffix!r} is not a type this daemon serves")
+    return FileResponse(candidate, media_type=content_type, headers=_NO_CACHE_HEADERS)
+
 
 DESCRIPTION = """
 The trial control daemon's HTTP and WebSocket API.
@@ -91,6 +122,16 @@ def create_app(
     )
     app.state.service = service
 
+    # `/elements/` is meant to be embedded in a console served from somewhere
+    # else (statemachined's dev/DAEMON.md §5, which this daemon follows), so
+    # nothing here may assume same-origin. The price is paid once, here.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
     @app.exception_handler(ServiceError)
     async def _service_error(request: Request, exc: ServiceError) -> JSONResponse:
         return JSONResponse(
@@ -101,7 +142,27 @@ def create_app(
     app.include_router(_api(service))
 
     if WEB_ROOT.is_dir():
-        app.mount("/", StaticFiles(directory=WEB_ROOT, html=True), name="web")
+        # Explicit routes rather than `StaticFiles`, so every response carries
+        # `_NO_CACHE_HEADERS` -- `StaticFiles` sends only an `ETag`, which lets a
+        # browser skip revalidation for a while under heuristic freshness, and
+        # a stale `/elements/triald.js` is exactly the panel list going stale
+        # in somebody's tab. The catch-all is last, or it would shadow `/api`
+        # and `/elements/` above it.
+        @app.get("/", include_in_schema=False)
+        def read_index() -> HTMLResponse:
+            return HTMLResponse(
+                (WEB_ROOT / "index.html").read_text(), headers=_NO_CACHE_HEADERS
+            )
+
+        @app.get("/elements/{relative_path:path}", include_in_schema=False)
+        def read_element_module(relative_path: str) -> FileResponse:
+            """The public contract: a console in another repo loads these by URL."""
+            return _read_asset(relative_path, WEB_ROOT / "elements")
+
+        @app.get("/{relative_path:path}", include_in_schema=False)
+        def read_shell_asset(relative_path: str) -> FileResponse:
+            """This daemon's own shell -- not a contract; rearrange at will."""
+            return _read_asset(relative_path, WEB_ROOT)
     else:  # pragma: no cover - only if the package was built without the UI
         log.warning("no web UI at %s; serving the API only", WEB_ROOT)
 

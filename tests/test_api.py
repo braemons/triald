@@ -646,5 +646,19 @@ def test_the_web_ui_is_served_from_the_daemon(client: TestClient):
     page = client.get("/")
     assert page.status_code == 200
     assert "triald" in page.text
-    assert client.get("/app.js").status_code == 200
-    assert client.get("/style.css").status_code == 200
+    assert client.get("/application_shell.js").status_code == 200
+    assert client.get("/triald_user_interface.css").status_code == 200
+
+
+def test_the_elements_contract_is_served_with_no_cache(client: TestClient):
+    response = client.get("/elements/triald.js")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-cache, must-revalidate"
+    assert "TRIALD_ELEMENT_NAMES" in response.text
+    for tag in ("session", "sets", "counters", "trials", "config", "debug"):
+        assert f'"triald-{tag}"' in response.text
+
+
+def test_an_unknown_path_under_elements_is_refused_not_guessed(client: TestClient):
+    assert client.get("/elements/does-not-exist.js").status_code == 404
+    assert client.get("/../pyproject.toml").status_code == 404
