@@ -2,7 +2,8 @@
 name = "triald"
 description = "Scriptable trial control daemon for brain research"
 readme = "README.md"
-license = { text = "AGPL-3.0-or-later" }
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE"]
 authors = [{ name = "Joscha Schmiedt" }]
 requires-python = ">=3.12"
 
@@ -80,7 +81,7 @@ dev = [
 ]
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]

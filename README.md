@@ -127,4 +127,4 @@ and sink operators map onto the state stream directly).
 
 ## License
 
-GNU AGPLv3. Copyright © 2026 Joscha Schmiedt, University of Bremen.
+GNU AGPLv3-or-later. Copyright © 2026 Joscha Schmiedt, University of Bremen.
