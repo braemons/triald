@@ -94,11 +94,15 @@ def test_a_stream_frame_names_its_arm():
     # `{"state": {…}}`, replacing the `{"kind": "state", …}` the panels read
     # today. One arm now; the envelope exists so a second can be added without
     # every client learning a new one.
-    frame = session_pb2.StreamFrame(sequence=3, at="2026-09-18T12:00:00+00:00")
+    frame = session_pb2.StreamFrame(sequence=3)
+    frame.at.FromJsonString("2026-09-18T12:00:00Z")
     frame.state.running = True
     written = as_dict(frame)
     assert written["state"]["running"] is True
     assert written["sequence"] == "3"
+    # RFC 3339 with a Z, which is what google.protobuf.Timestamp puts on the
+    # wire and what a client's generator hands back as a datetime.
+    assert written["at"] == "2026-09-18T12:00:00Z"
 
 
 def test_an_unknown_field_in_a_request_is_refused():
