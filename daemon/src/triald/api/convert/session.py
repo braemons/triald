@@ -127,3 +127,28 @@ def session_state_to_wire(
     if state.last is not None:
         message.last.CopyFrom(trial_record_to_wire(state.last))
     return message
+
+
+def stream_frame_to_wire(frame) -> session_pb2.StreamFrame:
+    """One frame of the state stream.
+
+    Every frame is a whole state, which is why a gap in `sequence` is not loss:
+    frames are coalesced under load and the newest is always the truth.
+    """
+    message = session_pb2.StreamFrame(sequence=frame.sequence)
+    message.at.FromDatetime(frame.at)
+    message.state.CopyFrom(session_state_to_wire_from_snapshot(frame.snapshot))
+    return message
+
+
+def session_state_to_wire_from_snapshot(snapshot) -> session_pb2.SessionState:
+    """The snapshot the service assembles, as one message."""
+    return session_state_to_wire(
+        snapshot.state,
+        armed=snapshot.armed,
+        trial_type_set=snapshot.trial_type_set,
+        config=snapshot.config,
+        policy=snapshot.policy,
+        policy_errors=snapshot.policy_errors,
+        number_offset=snapshot.number_offset,
+    )

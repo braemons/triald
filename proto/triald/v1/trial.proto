@@ -28,8 +28,13 @@ message OutcomeReport {
   // **Not part of the outcome: it addresses the message.** The report comes
   // from another machine over a network, and one that arrives late or twice
   // must be refused rather than attributed to the trial after the one it
-  // belongs to.
-  int64 trial_id = 1 [json_name = "trial_id"];
+  // belongs to. `contracts/INTERACTIONS.md` §5.1 is what leaving it out cost.
+  //
+  // `optional` although it is required, because proto3 has no required fields
+  // and a plain `int64` cannot tell "trial 0" from "no trial named". Absent is
+  // refused as a bad request — not as a conflict, which is what silently
+  // reading it as zero produced.
+  optional int64 trial_id = 1 [json_name = "trial_id"];
 
   TrialOutcome outcome = 2;
   Manipulandum manipulandum = 3;

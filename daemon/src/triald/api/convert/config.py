@@ -124,3 +124,12 @@ def config_patch_from_wire(message: config_pb2.ConfigPatch) -> dict[str, Any]:
     if message.HasField("seed"):
         changes["seed"] = message.seed
     return changes
+
+
+def config_update_to_wire(update) -> config_pb2.ConfigUpdateResult:
+    """What a config change did, and the config it left behind."""
+    return config_pb2.ConfigUpdateResult(
+        changed=list(update.changed),
+        bag_rebuilt=update.bag_rebuilt,
+        config=session_config_to_wire(update.config),
+    )

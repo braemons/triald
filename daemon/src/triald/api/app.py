@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The routes, and the app that serves them.
 
-Thin on purpose. A route parses its body into a model, calls one method on
-:class:`~triald.api.service.SessionService`, and returns a model; everything
+Thin on purpose. A route parses its body into a wire type, calls one method on
+:class:`~triald.api.service.SessionService`, and converts, and answers; everything
 about *when* something may be done lives in the service, and everything about
-*what shape* it has lives in :mod:`triald.api.schemas`. If a route grows a
+*what shape* it has lives in ``proto/triald/v1/``. If a route grows a
 decision in it, the decision is in the wrong place.
 
 Two conventions run through all of it:
@@ -13,7 +13,7 @@ Two conventions run through all of it:
   pushes it too, but a client that has just changed something should not have to
   wait for a frame to find out what it did - and a MATLAB script with no
   WebSocket at all should still be able to work purely from the replies.
-* **A refusal is an :class:`~triald.api.schemas.ErrorModel` with a 4xx.** The
+* **A refusal is a ``triald.v1.Error`` with a 4xx.** The
   ``detail`` is written to be shown to a person, because it usually is.
 
 The ``/api/debug`` group drives the *simulated* subject and exists so the whole
@@ -31,12 +31,22 @@ from pathlib import Path
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
+from google.protobuf import json_format
 
-from triald.api import schemas as sc
-from triald.api.service import ServiceError, SessionService
+from triald.api import convert, wire
+from triald.api.service import ServiceError, SessionService, SimSettings
 from triald.session import SessionConfig
 from triald.trialtypes import TrialTypeStore
+from triald.v1 import (
+    common_pb2,
+    config_pb2,
+    debug_pb2,
+    policy_pb2,
+    session_pb2,
+    sets_pb2,
+    trial_pb2,
+)
 
 log = logging.getLogger(__name__)
 
@@ -154,10 +164,16 @@ def create_app(
     )
 
     @app.exception_handler(ServiceError)
-    async def _service_error(request: Request, exc: ServiceError) -> JSONResponse:
-        return JSONResponse(
+    async def _service_error(request: Request, exc: ServiceError) -> Response:
+        """Every refusal in the same shape, through the same seam as an answer.
+
+        `detail` is meant to be shown to a person: it says what was wrong and,
+        where there is one, what to do instead.
+        """
+        return Response(
             status_code=exc.status,
-            content=sc.ErrorModel(error=exc.kind, detail=exc.detail).model_dump(),
+            content=wire.to_json(common_pb2.Error(error=exc.kind, detail=exc.detail)),
+            media_type="application/json",
         )
 
     app.include_router(_api(service))
@@ -191,94 +207,116 @@ def create_app(
 
 
 def _api(service: SessionService) -> APIRouter:
+    """The routes, every one of them declared in `proto/triald/v1/service.proto`.
+
+    **Nothing here has a `response_model`.** The interface is the proto, the
+    types are generated from it, and `triald.api.wire` turns one into the bytes
+    a client reads. FastAPI's own schema generation described the pydantic
+    models instead, which were a second description of the same interface —
+    exactly what `contracts/DAEMON_LAYOUT.md` exists to stop.
+
+    The cost is that request bodies are read and parsed here rather than
+    injected. It is a small cost and it buys the refusal: `wire.from_json`
+    rejects an unknown field by name, which is §11's rule for a request.
+    """
     router = APIRouter(prefix="/api")
 
-    async def state() -> sc.SessionStateModel:
-        return service.state_model()
+    def answer(message) -> Response:
+        return Response(content=wire.to_json(message), media_type="application/json")
+
+    async def body(request: Request, message_type):
+        """The request, parsed, or this API's own refusal.
+
+        A malformed body is the caller's mistake and says so with the field
+        named, rather than a 422 full of pydantic's internal paths.
+        """
+        try:
+            return wire.from_json(await request.body(), message_type)
+        except json_format.ParseError as exc:
+            # 422 rather than 400, which is what pydantic answered here before
+            # the types were generated: the JSON parsed, and what was wrong was
+            # its meaning. Kept because nothing forces a change and a client
+            # written against the old status should not have to learn a new one.
+            raise ServiceError(str(exc), kind="request", status=422) from exc
+
+    def state_message() -> session_pb2.SessionState:
+        return convert.session_state_to_wire_from_snapshot(service.snapshot())
 
     # -- state ------------------------------------------------------------------
 
-    @router.get("/state", response_model=sc.SessionStateModel, tags=["state"])
-    async def get_state() -> sc.SessionStateModel:
+    @router.get("/state", tags=["state"])
+    async def get_state() -> Response:
         """The whole snapshot: counters, the active set, the config, the policy."""
-        return await state()
+        return answer(state_message())
 
     @router.websocket("/stream")
     async def stream(websocket: WebSocket) -> None:
-        """Push a `StreamMessage` on every change, plus one on connect.
+        """Push a frame on every change, plus one on connect.
 
-        Frames are coalesced rather than queued for a slow client: this is a
-        state stream, so the newest snapshot is the only one worth having.
+        Frames are coalesced rather than queued for a slow client: every frame
+        is a whole state, so the newest is the only one worth having and a gap
+        in `sequence` is not loss.
         """
         await websocket.accept()
         with service.subscribe() as queue:
-            await websocket.send_json(
-                sc.StreamMessage(sequence=0, at=_now(), state=service.state_model()).model_dump(
-                    mode="json"
-                )
-            )
+            opening = session_pb2.StreamFrame(sequence=0)
+            opening.at.FromDatetime(_now())
+            opening.state.CopyFrom(state_message())
+            await websocket.send_text(wire.to_json(opening))
             try:
                 while True:
-                    message = await queue.get()
-                    await websocket.send_json(message.model_dump(mode="json"))
+                    frame = await queue.get()
+                    await websocket.send_text(wire.to_json(convert.stream_frame_to_wire(frame)))
             except WebSocketDisconnect:
                 return
 
     # -- session lifecycle ------------------------------------------------------
 
-    @router.post("/session/arm", response_model=sc.SessionStateModel, tags=["session"])
-    async def arm() -> sc.SessionStateModel:
+    @router.post("/session/arm", tags=["session"])
+    async def arm() -> Response:
         """Validate everything and start a new session. Counters start at zero."""
         async with service.publishing():
             service.arm()
-        return await state()
+        return answer(state_message())
 
-    @router.post("/session/stop", response_model=sc.SessionStateModel, tags=["session"])
-    async def stop(reason: str = "stopped by the operator") -> sc.SessionStateModel:
+    @router.post("/session/stop", tags=["session"])
+    async def stop(reason: str = "stopped by the operator") -> Response:
         async with service.publishing():
             await service.set_free_run(False, 250)
             service.stop(reason)
-        return await state()
+        return answer(state_message())
 
-    @router.post(
-        "/session/recording/start", response_model=sc.SessionStateModel, tags=["session"]
-    )
-    async def start_recording() -> sc.SessionStateModel:
+    @router.post("/session/recording/start", tags=["session"])
+    async def start_recording() -> Response:
         """Record from the next trial on. Opens a session directory if configured."""
         async with service.publishing():
             service.start_recording()
-        return await state()
+        return answer(state_message())
 
-    @router.post(
-        "/session/recording/pause", response_model=sc.SessionStateModel, tags=["session"]
-    )
-    async def pause_recording() -> sc.SessionStateModel:
+    @router.post("/session/recording/pause", tags=["session"])
+    async def pause_recording() -> Response:
         """Keep running, stop recording. A pausing trial runs but scores nothing."""
         async with service.publishing():
             service.pause_recording()
-        return await state()
+        return answer(state_message())
 
-    @router.post(
-        "/session/recording/resume", response_model=sc.SessionStateModel, tags=["session"]
-    )
-    async def resume_recording() -> sc.SessionStateModel:
+    @router.post("/session/recording/resume", tags=["session"])
+    async def resume_recording() -> Response:
         async with service.publishing():
             service.resume_recording()
-        return await state()
+        return answer(state_message())
 
-    @router.post(
-        "/session/recording/stop", response_model=sc.SessionStateModel, tags=["session"]
-    )
-    async def stop_recording() -> sc.SessionStateModel:
+    @router.post("/session/recording/stop", tags=["session"])
+    async def stop_recording() -> Response:
         """Close the record. The session keeps running."""
         async with service.publishing():
             service.stop_recording()
-        return await state()
+        return answer(state_message())
 
     # -- the trial loop ---------------------------------------------------------
 
-    @router.post("/trial/next", response_model=sc.TrialSpecModel, tags=["trial"])
-    async def next_trial() -> sc.TrialSpecModel:
+    @router.post("/trial/next", tags=["trial"])
+    async def next_trial() -> Response:
         """Select the next trial type and publish it.
 
         Everything about the trial is latched here, ``recording`` included.
@@ -286,164 +324,204 @@ def _api(service: SessionService) -> APIRouter:
         which is what stops one result being attributed to another trial.
         """
         async with service.publishing():
-            return service.next_trial()
+            return answer(convert.trial_spec_to_wire(service.next_trial()))
 
-    @router.post("/trial/outcome", response_model=sc.TrialRecordModel, tags=["trial"])
-    async def report_outcome(report: sc.OutcomeReportModel) -> sc.TrialRecordModel:
+    @router.post("/trial/outcome", tags=["trial"])
+    async def report_outcome(request: Request) -> Response:
         """Report how the trial in flight ended. The primary inbound message.
 
         The reply says whether it was *accepted* as well as counted, and why
         not when it was not.
         """
+        message = await body(request, trial_pb2.OutcomeReport)
+        if not message.HasField("trial_id"):
+            raise ServiceError(
+                "trial_id says which trial this is the outcome of, and is required: "
+                "a report that arrives late or twice must be refusable rather than "
+                "attributed to the trial after the one it belongs to",
+                kind="request",
+                status=422,
+            )
         async with service.publishing():
-            return service.report_outcome(report)
+            record = service.report_outcome(
+                convert.outcome_report_from_wire(message), trial_id=message.trial_id
+            )
+        return answer(convert.trial_record_to_wire(record))
 
-    @router.post("/trial/cancel", response_model=sc.TrialRecordModel, tags=["trial"])
-    async def cancel_trial(body: sc.CancelTrialModel) -> sc.TrialRecordModel:
+    @router.post("/trial/cancel", tags=["trial"])
+    async def cancel_trial(request: Request) -> Response:
         """End the trial in flight as CANCELLED.
 
         Recorded rather than dropped, so a gap in the trial numbering never has
         to be explained afterwards.
         """
+        message = await body(request, trial_pb2.CancelTrial)
         async with service.publishing():
-            return service.cancel_trial(body.reason)
+            return answer(convert.trial_record_to_wire(service.cancel_trial(message.reason)))
 
     # -- sets -------------------------------------------------------------------
 
-    @router.get("/sets", response_model=sc.SetsModel, tags=["sets"])
-    async def get_sets() -> sc.SetsModel:
-        """Every set, plus whether the switch chain from the active one holds up."""
-        return service.sets_model()
+    def sets_answer() -> Response:
+        snapshot = service.sets()
+        return answer(
+            convert.sets_to_wire(
+                snapshot.sets, active=snapshot.active, chain_problem=snapshot.chain_problem
+            )
+        )
 
-    @router.put("/sets/{name}", response_model=sc.SetsModel, tags=["sets"])
-    async def put_set(name: str, body: sc.TrialTypeSetModel) -> sc.SetsModel:
+    @router.get("/sets", tags=["sets"])
+    async def get_sets() -> Response:
+        """Every set, plus whether the switch chain from the active one holds up."""
+        return sets_answer()
+
+    @router.put("/sets/{name}", tags=["sets"])
+    async def put_set(name: str, request: Request) -> Response:
         """Add or replace a set, with its trial types and its switch rule."""
-        if body.name != name:
+        message = await body(request, sets_pb2.TrialTypeSet)
+        if message.name != name:
             raise ServiceError(
-                f"the path says {name!r} and the body says {body.name!r}; "
+                f"the path says {name!r} and the body says {message.name!r}; "
                 f"renaming a set is a delete and a put",
                 kind="sets",
                 status=400,
             )
         async with service.publishing():
-            return service.put_set(body)
+            service.put_set(convert.trial_type_set_from_wire(message))
+        return sets_answer()
 
-    @router.delete("/sets/{name}", response_model=sc.SetsModel, tags=["sets"])
-    async def delete_set(name: str) -> sc.SetsModel:
+    @router.delete("/sets/{name}", tags=["sets"])
+    async def delete_set(name: str) -> Response:
         async with service.publishing():
-            return service.delete_set(name)
+            service.delete_set(name)
+        return sets_answer()
 
-    @router.post("/sets/{name}/load", response_model=sc.SessionStateModel, tags=["sets"])
-    async def load_set(name: str) -> sc.SessionStateModel:
+    @router.post("/sets/{name}/load", tags=["sets"])
+    async def load_set(name: str) -> Response:
         """Make `name` active. Its block starts from nothing; counters are banked."""
         async with service.publishing():
             service.load_set(name)
-        return await state()
+        return answer(state_message())
 
     # -- config -----------------------------------------------------------------
 
-    @router.get("/config", response_model=sc.SessionConfigModel, tags=["config"])
-    async def get_config() -> sc.SessionConfigModel:
-        return sc.SessionConfigModel.of(service.config)
+    @router.get("/config", tags=["config"])
+    async def get_config() -> Response:
+        return answer(convert.session_config_to_wire(service.config))
 
-    @router.patch("/config", response_model=sc.ConfigUpdateResult, tags=["config"])
-    async def patch_config(patch: sc.ConfigPatch) -> sc.ConfigUpdateResult:
+    @router.patch("/config", tags=["config"])
+    async def patch_config(request: Request) -> Response:
         """Change part of the config, and hear what the change cost.
 
         The accept flags and the stop rules take effect on the next trial. The
         ordering, the round count and avoid-repeat rebuild the bag, which
         restarts the round. The rest is refused while a session runs.
         """
+        message = await body(request, config_pb2.ConfigPatch)
+        try:
+            changes = convert.config_patch_from_wire(message)
+        except convert.config.Refused as exc:
+            raise ServiceError(str(exc), kind="config", status=400) from exc
         async with service.publishing():
-            return service.update_config(patch)
+            return answer(convert.config_update_to_wire(service.update_config(changes)))
 
-    @router.post("/config/reset-rounds", response_model=sc.SessionStateModel, tags=["config"])
-    async def reset_rounds() -> sc.SessionStateModel:
+    @router.post("/config/reset-rounds", tags=["config"])
+    async def reset_rounds() -> Response:
         """Refill the bag and clear the round and set-progress counters."""
         async with service.publishing():
             service.reset_rounds()
-        return await state()
+        return answer(state_message())
 
-    @router.post("/config/reset-counters", response_model=sc.SessionStateModel, tags=["config"])
-    async def reset_counters() -> sc.SessionStateModel:
+    @router.post("/config/reset-counters", tags=["config"])
+    async def reset_counters() -> Response:
         """Clear every outcome tally, in every set. The bag and round are left alone."""
         async with service.publishing():
             service.reset_counters()
-        return await state()
+        return answer(state_message())
 
     # -- policy -----------------------------------------------------------------
 
-    @router.get("/policy", response_model=sc.PolicyInfoModel, tags=["policy"])
-    async def get_policy(source: bool = False) -> sc.PolicyInfoModel:
+    @router.get("/policy", tags=["policy"])
+    async def get_policy(source: bool = False) -> Response:
         """The running policy, its content hash, and its last snapshot()."""
-        return service.policy_info(with_source=source)
+        return answer(convert.policy_info_to_wire(service.policy_info(with_source=source)))
 
-    @router.post("/policy/check", response_model=sc.PolicyCheckResult, tags=["policy"])
-    async def check_policy(body: sc.PolicySourceModel) -> sc.PolicyCheckResult:
+    @router.post("/policy/check", tags=["policy"])
+    async def check_policy(request: Request) -> Response:
         """Import and smoke-run source text without touching the session.
 
         Diagnostics carry line numbers so an editor can mark the offending line.
         """
-        return service.check_policy(body.name, body.source)
+        message = await body(request, policy_pb2.PolicySource)
+        return answer(
+            convert.policy_check_to_wire(service.check_policy(message.name, message.source))
+        )
 
-    @router.put("/policy", response_model=sc.PolicyInfoModel, tags=["policy"])
-    async def load_policy(body: sc.PolicySourceModel) -> sc.PolicyInfoModel:
+    @router.put("/policy", tags=["policy"])
+    async def load_policy(request: Request) -> Response:
         """Store source text and run it from the next arm onwards.
 
         Checked first, always: a syntax error must never reach a session.
         """
+        message = await body(request, policy_pb2.PolicySource)
         async with service.publishing():
-            return service.load_policy_source(body.name, body.source)
+            info = service.load_policy_source(message.name, message.source)
+        return answer(convert.policy_info_to_wire(info))
 
-    @router.delete("/policy", response_model=sc.PolicyInfoModel, tags=["policy"])
-    async def clear_policy() -> sc.PolicyInfoModel:
+    @router.delete("/policy", tags=["policy"])
+    async def clear_policy() -> Response:
         """Go back to the declarative behaviour."""
         async with service.publishing():
-            return service.clear_policy()
+            return answer(convert.policy_info_to_wire(service.clear_policy()))
 
     # -- events -----------------------------------------------------------------
 
-    @router.post("/events/note", response_model=sc.OkModel, tags=["events"])
-    async def note(body: sc.NoteModel) -> sc.OkModel:
+    @router.post("/events/note", tags=["events"])
+    async def note(request: Request) -> Response:
         """Append an experimenter's note to the session's event stream."""
-        service.note(body.text)
-        return sc.OkModel()
+        message = await body(request, session_pb2.NoteRequest)
+        service.note(message.text)
+        return answer(common_pb2.Ok(ok=True))
 
     # -- debug ------------------------------------------------------------------
 
-    @router.get("/debug/sim", response_model=sc.SimSettingsModel, tags=["debug"])
-    async def get_sim() -> sc.SimSettingsModel:
-        return service.sim
+    @router.get("/debug/sim", tags=["debug"])
+    async def get_sim() -> Response:
+        return answer(convert.sim_settings_to_wire(service.sim))
 
-    @router.put("/debug/sim", response_model=sc.SimSettingsModel, tags=["debug"])
-    async def put_sim(body: sc.SimSettingsModel) -> sc.SimSettingsModel:
+    @router.put("/debug/sim", tags=["debug"])
+    async def put_sim(request: Request) -> Response:
         """Retune the simulated subject. The RNG keeps its place."""
+        message = await body(request, debug_pb2.SimSettings)
         async with service.publishing():
-            service.set_sim(body)
-        return service.sim
+            service.set_sim(convert.sim_settings_from_wire(message, SimSettings))
+        return answer(convert.sim_settings_to_wire(service.sim))
 
-    @router.post("/debug/step", response_model=sc.StepResult, tags=["debug"])
-    async def step(body: sc.StepRequest) -> sc.StepResult:
+    @router.post("/debug/step", tags=["debug"])
+    async def step(request: Request) -> Response:
         """Run whole simulated trials through the real loop, and return the state."""
+        message = await body(request, debug_pb2.StepRequest)
         async with service.publishing():
-            ran = service.step(body.trials)
-        return sc.StepResult(
+            ran = service.step(message.trials)
+        result = debug_pb2.StepResult(
             trials=ran,
             stopped=not service.session.running,
-            stop_reason=service.session.stop_reason,
-            state=await state(),
+            state=state_message(),
         )
+        if service.session.stop_reason is not None:
+            result.stop_reason = service.session.stop_reason
+        return answer(result)
 
-    @router.get("/debug/free-run", response_model=sc.FreeRunStatus, tags=["debug"])
-    async def get_free_run() -> sc.FreeRunStatus:
-        return service.free_run_status()
+    @router.get("/debug/free-run", tags=["debug"])
+    async def get_free_run() -> Response:
+        return answer(convert.free_run_to_wire(service.free_run_status()))
 
-    @router.put("/debug/free-run", response_model=sc.FreeRunStatus, tags=["debug"])
-    async def put_free_run(body: sc.FreeRunModel) -> sc.FreeRunStatus:
+    @router.put("/debug/free-run", tags=["debug"])
+    async def put_free_run(request: Request) -> Response:
         """Step the simulator on a timer until it is stopped or the session ends."""
-        status = await service.set_free_run(body.running, body.interval_ms)
+        message = await body(request, debug_pb2.FreeRun)
+        status = await service.set_free_run(message.running, message.interval_ms)
         await service.publish()
-        return status
+        return answer(convert.free_run_to_wire(status))
 
     return router
 

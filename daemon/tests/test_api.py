@@ -16,6 +16,8 @@ the same reason it is tested in ``test_session.py``.
 
 from __future__ import annotations
 
+import datetime as dt
+import json
 import time
 
 import pytest
@@ -24,8 +26,7 @@ pytest.importorskip("fastapi", reason="the API needs the 'serve' extra")
 
 from fastapi.testclient import TestClient
 
-from triald.api import SessionService, create_app
-from triald.api import schemas as sc
+from triald.api import SessionService, convert, create_app, wire
 from triald.counters import TrialCountCriterion
 from triald.selection import Ordering
 from triald.session import SessionConfig
@@ -78,7 +79,8 @@ def next_trial(client: TestClient) -> int:
     """Select a trial and give its number, which its outcome has to carry."""
     response = client.post("/api/trial/next")
     assert response.status_code == 200, response.text
-    return response.json()["trial_number"]
+    # A 64-bit number is a string on the wire; the tests do arithmetic on it.
+    return int(response.json()["trial_number"])
 
 
 def arm(client: TestClient) -> dict:
@@ -129,13 +131,13 @@ def test_the_trial_loop_refuses_to_run_unarmed(client: TestClient):
 def test_a_trial_can_be_selected_and_reported(client: TestClient):
     arm(client)
     spec = client.post("/api/trial/next").json()
-    assert spec["trial_number"] == 1
+    assert spec["trial_number"] == "1"
     assert spec["set_name"] == "easy"
 
     record = client.post("/api/trial/outcome", json={"trial_id": 1, "outcome": "HIT"}).json()
     assert record["outcome"]["code"] == 1
     assert record["accepted"] is True
-    assert record["refusal_reason"] is None
+    assert "refusal_reason" not in record
 
 
 def test_an_outcome_may_be_given_by_code_or_by_name(client: TestClient):
@@ -163,7 +165,7 @@ def test_an_outcome_for_another_trial_is_refused(client: TestClient):
 
     # And the refused report changed nothing: the trial is still in flight.
     state = client.get("/api/state").json()
-    assert state["current"]["trial_number"] == trial
+    assert int(state["current"]["trial_number"]) == trial
     assert state["totals"]["total"] == 0
 
 
@@ -192,7 +194,8 @@ def test_the_trial_cap_reaches_the_wire_and_shows_on_the_trial(client: TestClien
 
 def test_no_cap_means_no_deadline_on_the_wire(client: TestClient):
     arm(client)
-    assert client.post("/api/trial/next").json()["deadline"] is None
+    # Absent rather than null: no cap means the field is not on the wire at all.
+    assert "deadline" not in client.post("/api/trial/next").json()
 
 
 def test_never_finished_is_refused_by_default_and_can_be_accepted(client: TestClient):
@@ -220,13 +223,13 @@ def test_the_watchdog_expires_a_trial_nobody_answers(client: TestClient):
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
         state = client.get("/api/state").json()
-        if state["current"] is None:
+        if "current" not in state:
             break
         time.sleep(0.05)
 
     state = client.get("/api/state").json()
-    assert state["current"] is None, "the watchdog never fired"
-    assert state["last"]["trial"]["trial_number"] == trial
+    assert "current" not in state, "the watchdog never fired"
+    assert int(state["last"]["trial"]["trial_number"]) == trial
     assert state["last"]["outcome"]["name"] == "NEVER_FINISHED"
     assert state["last"]["outcome"]["code"] == 11
     assert state["last"]["accepted"] is False
@@ -241,7 +244,11 @@ def test_an_unknown_outcome_name_is_refused_with_the_alternatives(client: TestCl
         "/api/trial/outcome", json={"trial_id": trial, "outcome": "SPLENDID"}
     )
     assert response.status_code == 422
-    assert "HIT" in response.text
+    # The refusal names the field and the enum type rather than listing every
+    # valid value, which is what protobuf's parser says. The values themselves
+    # are one fetch away, in proto/triald/v1/outcomes.proto.
+    assert "outcome" in response.json()["detail"]
+    assert "TrialOutcome" in response.json()["detail"]
 
 
 def test_two_selections_without_a_result_are_refused(client: TestClient):
@@ -299,8 +306,11 @@ def test_imprecise_fixation_vetoes_on_its_own(client: TestClient):
 def test_stepping_runs_whole_trials(client: TestClient):
     arm(client)
     result = client.post("/api/debug/step", json={"trials": 20}).json()
+    # `trials` is an int32 and comes back a number; `trials_started` is an
+    # int64 and comes back a string. Both are protobuf's JSON mapping doing
+    # what it says, and the difference is worth seeing in one place.
     assert result["trials"] == 20
-    assert result["state"]["trials_started"] == 20
+    assert result["state"]["trials_started"] == "20"
     assert result["state"]["totals"]["total"] == 20
 
 
@@ -364,7 +374,7 @@ def test_the_accept_flags_take_effect_on_the_next_trial(client: TestClient):
 
 def test_changing_the_ordering_rebuilds_the_bag(client: TestClient):
     arm(client)
-    result = client.patch("/api/config", json={"ordering": "descending"}).json()
+    result = client.patch("/api/config", json={"ordering": "ORDERING_DESCENDING"}).json()
     assert result["changed"] == ["ordering"]
     assert result["bag_rebuilt"] is True
 
@@ -376,9 +386,12 @@ def test_changing_the_ordering_rebuilds_the_bag(client: TestClient):
 def test_every_ordering_is_accepted_on_the_wire(client: TestClient):
     arm(client)
     for ordering in Ordering:
-        response = client.patch("/api/config", json={"ordering": ordering.value})
+        # The wire spells an enum with its full name, so a client generated in
+        # another language agrees about the same byte.
+        on_the_wire = f"ORDERING_{ordering.name}"
+        response = client.patch("/api/config", json={"ordering": on_the_wire})
         assert response.status_code == 200, ordering
-        assert response.json()["config"]["ordering"] == ordering.value
+        assert response.json()["config"]["ordering"] == on_the_wire
 
 
 def test_an_arm_time_setting_is_refused_while_running(client: TestClient):
@@ -399,11 +412,16 @@ def test_stop_after_trials_is_cleared_with_a_zero(client: TestClient):
     client.patch("/api/config", json={"stop_after_trials": 10})
     assert client.get("/api/config").json()["stop_after_trials"] == 10
     client.patch("/api/config", json={"stop_after_trials": 0})
-    assert client.get("/api/config").json()["stop_after_trials"] is None
+    # Gone from the wire entirely, which is what "no limit" looks like now: an
+    # absent optional rather than an explicit null.
+    assert "stop_after_trials" not in client.get("/api/config").json()
 
 
 def test_the_stop_rule_ends_the_session(client: TestClient):
-    client.patch("/api/config", json={"stop_after_trials": 12, "stop_criterion": "all_trials"})
+    client.patch(
+        "/api/config",
+        json={"stop_after_trials": 12, "stop_criterion": "TRIAL_COUNT_CRITERION_ALL_TRIALS"},
+    )
     arm(client)
     result = client.post("/api/debug/step", json={"trials": 100}).json()
     assert result["stopped"] is True
@@ -433,7 +451,7 @@ def test_the_sets_listing_shows_the_chain_and_which_is_active(client: TestClient
     body = client.get("/api/sets").json()
     assert [s["name"] for s in body["sets"]] == ["easy", "hard"]
     assert body["active"] == "easy"
-    assert body["chain_problem"] is None
+    assert "chain_problem" not in body
     assert body["sets"][0]["switch_rule"]["target"] == "hard"
     assert body["sets"][0]["trials_per_round"] == 4
 
@@ -444,7 +462,12 @@ def test_a_broken_switch_chain_is_reported_before_anybody_starts(client: TestCli
         json={
             "name": "hard",
             "trial_types": [{"name": "hard_a", "trials_per_round": 1}],
-            "switch_rule": {"enabled": True, "criterion": "hits", "count": 3, "target": "gone"},
+            "switch_rule": {
+                "enabled": True,
+                "criterion": "TRIAL_COUNT_CRITERION_HITS",
+                "count": 3,
+                "target": "gone",
+            },
         },
     ).json()
     assert "not in the store" in body["chain_problem"]
@@ -573,7 +596,7 @@ def test_a_policy_that_raises_is_reported_rather_than_loaded(client: TestClient)
 
     response = client.put("/api/policy", json={"name": "boom", "source": source})
     assert response.status_code == 400
-    assert client.get("/api/policy").json()["origin"] == "default"
+    assert client.get("/api/policy").json()["origin"] == "POLICY_ORIGIN_DEFAULT"
 
 
 def test_a_loaded_policy_drives_the_selection(client: TestClient, tmp_path):
@@ -582,7 +605,7 @@ def test_a_loaded_policy_drives_the_selection(client: TestClient, tmp_path):
         "/api/policy", json={"name": "always_first", "source": GOOD_POLICY}
     ).json()
     assert info["class_name"] == "AlwaysFirst"
-    assert info["origin"] == "uploaded"
+    assert info["origin"] == "POLICY_ORIGIN_UPLOADED"
     assert info["state"] == {"level": 3}
 
     arm(client)
@@ -605,41 +628,63 @@ def test_a_policy_cannot_be_swapped_mid_session(client: TestClient):
 def test_the_stream_opens_with_the_current_state_and_pushes_changes(client: TestClient):
     with client.websocket_connect("/api/stream") as socket:
         first = socket.receive_json()
-        assert first["kind"] == "state"
-        assert first["sequence"] == 0
+        # A oneof rather than a `kind` beside flattened fields: one key names
+        # the arm, and a second kind of frame can be added without every client
+        # learning a new envelope.
+        assert first["sequence"] == "0"
         assert first["state"]["running"] is False
 
         client.post("/api/session/arm")
         frame = socket.receive_json()
-        assert frame["sequence"] >= 1
+        assert int(frame["sequence"]) >= 1
         assert frame["state"]["running"] is True
 
 
 # -- the wire shape -------------------------------------------------------------
 
 
-def test_the_wire_and_the_record_carry_the_trial_identically(service: SessionService):
-    """A `TrialRecordModel` must serialise to the `trials.jsonl` line exactly.
+def test_the_wire_carries_the_whole_trial(service: SessionService):
+    """Everything `trials.jsonl` holds about a trial reaches the wire.
 
-    They are the same trial written twice, so if this ever fails it is a
-    divergence between the record format and the API - not a test to relax.
+    The two were asserted byte-identical before the interface was generated,
+    because the wire *was* the record model. They are two shapes now — the
+    record keeps `+00:00` and plain integers, the wire is RFC 3339 and strings —
+    so what is checked is that nothing was dropped on the way.
     """
     service.arm()
     service.step(5)
     record = service.session.state().history[-1]
 
-    from_wire = sc.TrialRecordModel.of(record).model_dump(mode="json")
+    from_wire = json.loads(wire.to_json(convert.trial_record_to_wire(record)))
     from_record = record.as_dict()
 
-    # Pydantic writes an aware datetime as ...+00:00 and isoformat() agrees, so
-    # the two are comparable without normalising anything.
-    assert from_wire == from_record
+    assert from_wire["accepted"] == from_record["accepted"]
+    assert from_wire["outcome"]["code"] == from_record["outcome"]["code"]
+    assert from_wire["outcome"]["name"] == from_record["outcome"]["name"]
+    assert int(from_wire["trial"]["trial_number"]) == from_record["trial"]["trial_number"]
+    assert from_wire["trial"]["trial_type_name"] == from_record["trial"]["trial_type_name"]
+    # The instants are the same moment written two ways.
+    assert dt.datetime.fromisoformat(
+        from_wire["ended_at"].replace("Z", "+00:00")
+    ) == dt.datetime.fromisoformat(from_record["ended_at"])
 
 
-def test_every_ordering_and_criterion_reaches_the_openapi_document(client: TestClient):
-    schemas = client.get("/openapi.json").json()["components"]["schemas"]
-    assert set(schemas["Ordering"]["enum"]) == {o.value for o in Ordering}
-    assert set(schemas["TrialCountCriterion"]["enum"]) == {c.value for c in TrialCountCriterion}
+def test_every_ordering_and_criterion_is_in_the_interface(client: TestClient):
+    """The enums the API accepts are the enums the daemon has.
+
+    This read the OpenAPI document, which no longer exists: the interface is
+    `proto/triald/v1/`, and the generated enum descriptors are what a client
+    would generate from. Same check, one description instead of two.
+    """
+    from triald.v1 import common_pb2
+
+    on_the_wire = set(common_pb2.Ordering.keys()) - {"ORDERING_UNSPECIFIED"}
+    assert on_the_wire == {f"ORDERING_{o.name}" for o in Ordering}
+
+    criteria = set(common_pb2.TrialCountCriterion.keys()) - {
+        "TRIAL_COUNT_CRITERION_UNSPECIFIED"
+    }
+    assert criteria == {f"TRIAL_COUNT_CRITERION_{c.name}" for c in TrialCountCriterion}
 
 
 def test_the_web_ui_is_served_from_the_daemon(client: TestClient):

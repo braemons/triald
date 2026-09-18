@@ -29,10 +29,17 @@ teach you the other.
 from .config import (
     acceptance_to_wire,
     config_patch_from_wire,
+    config_update_to_wire,
     session_config_to_wire,
 )
-from .policy import policy_error_to_wire, policy_info_to_wire
-from .session import session_state_to_wire, set_progress_to_wire
+from .debug import free_run_to_wire, sim_settings_from_wire, sim_settings_to_wire
+from .policy import policy_check_to_wire, policy_error_to_wire, policy_info_to_wire
+from .session import (
+    session_state_to_wire,
+    session_state_to_wire_from_snapshot,
+    set_progress_to_wire,
+    stream_frame_to_wire,
+)
 from .sets import sets_to_wire, trial_type_set_from_wire, trial_type_set_to_wire
 from .trial import (
     outcome_report_from_wire,
@@ -43,13 +50,20 @@ from .trial import (
 __all__ = [
     "acceptance_to_wire",
     "config_patch_from_wire",
+    "config_update_to_wire",
+    "free_run_to_wire",
     "outcome_report_from_wire",
+    "policy_check_to_wire",
     "policy_error_to_wire",
     "policy_info_to_wire",
     "session_config_to_wire",
     "session_state_to_wire",
+    "session_state_to_wire_from_snapshot",
     "set_progress_to_wire",
     "sets_to_wire",
+    "sim_settings_from_wire",
+    "sim_settings_to_wire",
+    "stream_frame_to_wire",
     "trial_record_to_wire",
     "trial_spec_to_wire",
     "trial_type_set_from_wire",

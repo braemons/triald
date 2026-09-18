@@ -3,15 +3,24 @@
 
 Three things live here, in dependency order:
 
-* :mod:`triald.api.schemas` - Pydantic models covering everything that crosses
-  the wire. **This is the contract**, not :class:`triald.Session`: the web UI and
-  every client is written against these models and the OpenAPI document
-  generated from them.
+* :mod:`triald.api.wire` - protobuf's JSON mapping, with this API's settings
+  pinned. The types themselves are generated from ``proto/triald/v1/``, which
+  **is** the contract: types and behaviours both, hand-authored, and everything
+  a client reads is generated from it rather than describing it afterwards.
+* :mod:`triald.api.convert` - the seam. Wire types on one side, this daemon's
+  own frozen dataclasses on the other, and every conversion between them in one
+  place. Nothing below this layer names a protobuf type.
 * :mod:`triald.api.service` - one rig's session, the thing the routes mutate.
   Owns the store, the config, the live :class:`~triald.session.Session`, the
   simulated subject behind the debug controls, and the list of subscribers.
 * :mod:`triald.api.app` - the FastAPI application and the routes themselves,
-  which are deliberately thin: parse, call the service, return a model.
+  which are deliberately thin: parse, call the service, convert, answer.
+
+``schemas.py`` used to be the first of these — pydantic models that were the
+contract, with the OpenAPI document generated from them. It is gone. A schema
+generated from the code can only ever restate what the code happens to do,
+which is the second description ``contracts/DAEMON_LAYOUT.md`` exists to
+prevent now that the first one is written by hand.
 
 Importing this package needs the ``serve`` extra (``pip install triald[serve]``).
 The domain logic in the rest of ``triald`` needs nothing at all, which is why

@@ -51,3 +51,24 @@ def policy_error_to_wire(error: dict[str, Any]) -> policy_pb2.PolicyError:
         at if isinstance(at, dt.datetime) else dt.datetime.fromisoformat(at)
     )
     return message
+
+
+def policy_check_to_wire(check) -> policy_pb2.PolicyCheckResult:
+    """What checking a policy found.
+
+    A diagnostic's line and column are absent when there is nothing to point at
+    — the policy imported and then misbehaved — rather than zero, which an
+    editor would happily jump to.
+    """
+    message = policy_pb2.PolicyCheckResult(
+        ok=check.ok, sha256=check.sha256, trials_run=check.trials_run
+    )
+    if check.class_name is not None:
+        message.class_name = check.class_name
+    for line, column, text in check.diagnostics:
+        diagnostic = message.diagnostics.add(message=text)
+        if line is not None:
+            diagnostic.line = line
+        if column is not None:
+            diagnostic.column = column
+    return message

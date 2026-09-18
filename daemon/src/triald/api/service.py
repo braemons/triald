@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import copy
+import dataclasses
 import datetime as dt
 import hashlib
 import logging
@@ -35,16 +37,104 @@ from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from typing import Any, Literal
 
-from triald.api import schemas as sc
 from triald.behaviour import SimulatedBehaviourSource
 from triald.metadata import SessionEvent, SessionMetadata
+from triald.outcomes import OutcomeReport
 from triald.policy import DeclarativePolicy, Policy, PolicyError, load_policy
 from triald.recording import RecordingError, SessionRecorder
 from triald.runner import run_trial
 from triald.session import Session, SessionConfig, SessionError
-from triald.trialtypes import TRIAL_TYPES_PER_SET, TrialTypeStore
+from triald.state import SessionState, TrialRecord, TrialSpec
+from triald.trialtypes import TRIAL_TYPES_PER_SET, TrialTypeSet, TrialTypeStore
 
 log = logging.getLogger(__name__)
+
+
+# -- what this layer hands to `triald.api.convert` -----------------------------
+#
+# Small carriers, not wire types. The API layer assembles an answer out of
+# several places — a session, a store, a policy — and something has to carry
+# the pieces from here to the seam. These do, and they are dataclasses for the
+# same reason everything else in this daemon is: a protobuf message here would
+# put the wire format inside the service.
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class StateSnapshot:
+    """Everything the state message is assembled from."""
+
+    state: SessionState
+    armed: bool
+    trial_type_set: TrialTypeSet
+    config: SessionConfig
+    policy: dict[str, Any]
+    policy_errors: list[dict[str, Any]]
+    number_offset: int
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class SetsSnapshot:
+    """Every set in the store, and whether the switch chain hangs together."""
+
+    sets: list[TrialTypeSet]
+    active: str | None
+    chain_problem: str | None
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class ConfigUpdate:
+    """What a config change actually did."""
+
+    changed: list[str]
+    bag_rebuilt: bool
+    config: SessionConfig
+
+
+@dataclasses.dataclass(slots=True)
+class SimSettings:
+    """The synthetic subject's probabilities.
+
+    Mutable and not frozen: the debug panel moves a slider and the subject is
+    retuned in place, which is the whole point of it.
+    """
+
+    hit_rate: float = 0.75
+    not_started_rate: float = 0.05
+    eye_error_rate: float = 0.08
+    early_rate: float = 0.05
+    frame_loss_rate: float = 0.0
+    imprecise_fixation_rate: float = 0.0
+    hit_rate_by_type: dict[str, float] = dataclasses.field(default_factory=dict)
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class StreamFrame:
+    """One frame of the state stream, before it is a wire message."""
+
+    sequence: int
+    at: dt.datetime
+    snapshot: StateSnapshot
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class FreeRun:
+    """Whether the simulator is stepping on a timer, and how fast."""
+
+    running: bool
+    interval_ms: int
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class PolicyCheck:
+    """What checking a policy found. `diagnostics` are messages, with a line
+    number when the failure was a syntax error and none when it was not."""
+
+    ok: bool
+    class_name: str | None
+    sha256: str
+    diagnostics: list[tuple[int | None, int | None, str]]
+    trials_run: int = 0
+
 
 #: How often the watchdog looks at the trial in flight. Coarse on purpose: it is
 #: guarding against a daemon that has stopped answering, not measuring anything,
@@ -97,13 +187,13 @@ class SessionService:
         self._policy_sha: str | None = None
         self._policy_origin: Literal["default", "file", "uploaded"] = "default"
 
-        self.sim = sc.SimSettingsModel()
+        self.sim = SimSettings()
         self._subject = self._build_subject()
         self._recorder: SessionRecorder | None = None
 
         self._session = self._build_session()
 
-        self._subscribers: set[asyncio.Queue[sc.StreamMessage]] = set()
+        self._subscribers: set[asyncio.Queue[StreamFrame]] = set()
         self._sequence = 0
         self._free_run: asyncio.Task[None] | None = None
         self._watchdog: asyncio.Task[None] | None = None
@@ -130,7 +220,7 @@ class SessionService:
         """
         return SimulatedBehaviourSource(
             rng=random.Random(self.config.seed),
-            **self.sim.model_dump(),
+            **dataclasses.asdict(self.sim),
         )
 
     # -- session lifecycle ------------------------------------------------------
@@ -245,33 +335,33 @@ class SessionService:
 
     # -- the trial loop ---------------------------------------------------------
 
-    def next_trial(self) -> sc.TrialSpecModel:
+    def next_trial(self) -> TrialSpec:
         session = self.require_running()
         try:
             spec = session.next_trial()
         except SessionError as exc:
             raise ServiceError(str(exc), kind="session") from exc
         self._subject.set_current_trial(spec)
-        return sc.TrialSpecModel.of(spec)
+        return spec
 
-    def report_outcome(self, report: sc.OutcomeReportModel) -> sc.TrialRecordModel:
+    def report_outcome(self, report: OutcomeReport, *, trial_id: int) -> TrialRecord:
         session = self.require_running()
         try:
-            record = session.report_outcome(report.build(), trial_id=report.trial_id)
+            record = session.report_outcome(report, trial_id=trial_id)
         except SessionError as exc:
             raise ServiceError(str(exc), kind="session") from exc
         except RecordingError as exc:
             self._session.stop(f"the recording failed: {exc}")
             raise ServiceError(str(exc), kind="recording", status=500) from exc
-        return sc.TrialRecordModel.of(record)
+        return record
 
-    def cancel_trial(self, reason: str) -> sc.TrialRecordModel:
+    def cancel_trial(self, reason: str) -> TrialRecord:
         session = self.require_running()
         try:
             record = session.cancel_trial(reason)
         except SessionError as exc:
             raise ServiceError(str(exc), kind="session") from exc
-        return sc.TrialRecordModel.of(record)
+        return record
 
     # -- the debug stepper ------------------------------------------------------
 
@@ -306,23 +396,23 @@ class SessionService:
             self._close_recorder()
         return ran
 
-    def set_sim(self, settings: sc.SimSettingsModel) -> None:
+    def set_sim(self, settings: SimSettings) -> None:
         """Retune the simulated subject without restarting the session.
 
         The RNG is left where it is: only the probabilities change, so a session
         stays reproducible up to the point somebody moved a slider.
         """
         self.sim = settings
-        for name, value in settings.model_dump().items():
+        for name, value in dataclasses.asdict(settings).items():
             setattr(self._subject, name, value)
 
     # -- free run ---------------------------------------------------------------
 
-    def free_run_status(self) -> sc.FreeRunStatus:
+    def free_run_status(self) -> FreeRun:
         running = self._free_run is not None and not self._free_run.done()
-        return sc.FreeRunStatus(running=running, interval_ms=self._free_run_interval_ms)
+        return FreeRun(running=running, interval_ms=self._free_run_interval_ms)
 
-    async def set_free_run(self, running: bool, interval_ms: int) -> sc.FreeRunStatus:
+    async def set_free_run(self, running: bool, interval_ms: int) -> FreeRun:
         """Start or stop stepping the simulator on a timer."""
         self._free_run_interval_ms = interval_ms
         await self._cancel_free_run()
@@ -405,22 +495,20 @@ class SessionService:
 
     # -- sets -------------------------------------------------------------------
 
-    def sets_model(self) -> sc.SetsModel:
+    def sets(self) -> SetsSnapshot:
+        """Every set in the store, with what the daemon knows about them.
+
+        The pieces rather than a wire message: `triald.api.convert` turns these
+        into one, and nothing below the API layer names a protobuf type.
+        """
         active = self._session.trial_type_set.name
-        return sc.SetsModel(
-            sets=[
-                sc.TrialTypeSetModel.of(
-                    s,
-                    set_number=self.store.index_of(s.name) + 1,
-                    active=s.name == active,
-                )
-                for s in self.store.sets()
-            ],
+        return SetsSnapshot(
+            sets=list(self.store.sets()),
             active=active,
             chain_problem=self.store.validate_switch_chain(active),
         )
 
-    def put_set(self, model: sc.TrialTypeSetModel) -> sc.SetsModel:
+    def put_set(self, new_set: TrialTypeSet) -> SetsSnapshot:
         """Add or replace a set.
 
         Replacing the *active* set while a session runs rebuilds the bag, which
@@ -428,26 +516,21 @@ class SessionService:
         round across a change of weights. The counters are banked by name and
         survive it.
         """
-        try:
-            new_set = model.build()
-        except ValueError as exc:
-            raise ServiceError(str(exc), kind="sets", status=400) from exc
-
         active = self._session.trial_type_set.name
-        if self._session.running and model.name == active and not new_set.is_runnable():
+        if self._session.running and new_set.name == active and not new_set.is_runnable():
             raise ServiceError(
-                f"set {model.name!r} is running and every weight is zero, so a "
+                f"set {new_set.name!r} is running and every weight is zero, so a "
                 f"round would be empty - give one trial type a weight first",
                 kind="sets",
                 status=400,
             )
 
         self.store.put(new_set)
-        if self._session.running and model.name == active:
-            self._session.load_set(model.name)
-        return self.sets_model()
+        if self._session.running and new_set.name == active:
+            self._session.load_set(new_set.name)
+        return self.sets()
 
-    def delete_set(self, name: str) -> sc.SetsModel:
+    def delete_set(self, name: str) -> SetsSnapshot:
         if name == self._session.trial_type_set.name:
             raise ServiceError(
                 f"set {name!r} is the one that is loaded; load another first",
@@ -457,7 +540,7 @@ class SessionService:
             self.store.remove(name)
         except KeyError as exc:
             raise ServiceError(str(exc), kind="sets", status=404) from exc
-        return self.sets_model()
+        return self.sets()
 
     def load_set(self, name: str) -> None:
         """Make `name` the active set. Its block starts from nothing.
@@ -473,7 +556,7 @@ class SessionService:
 
     # -- config -----------------------------------------------------------------
 
-    def update_config(self, patch: sc.ConfigPatch) -> sc.ConfigUpdateResult:
+    def update_config(self, changes: dict[str, Any]) -> ConfigUpdate:
         """Apply a partial config change, and say what it cost.
 
         The session holds the very same config object, so this goes through
@@ -483,7 +566,7 @@ class SessionService:
         """
         armed = self._session.armed
         try:
-            changed = self._session.reconfigure(patch.changes())
+            changed = self._session.reconfigure(changes)
         except SessionError as exc:
             raise ServiceError(str(exc), kind="config", status=400) from exc
 
@@ -493,10 +576,10 @@ class SessionService:
         if set(changed) & Session.ARM_TIME_FIELDS:
             self._session = self._build_session()
 
-        return sc.ConfigUpdateResult(
+        return ConfigUpdate(
             changed=changed,
             bag_rebuilt=armed and bool(set(changed) & Session.BAG_FIELDS),
-            config=sc.SessionConfigModel.of(self.config),
+            config=self.config,
         )
 
     def reset_rounds(self) -> None:
@@ -507,20 +590,26 @@ class SessionService:
 
     # -- policy -----------------------------------------------------------------
 
-    def policy_info(self, *, with_source: bool = False) -> sc.PolicyInfoModel:
+    def policy_info(self, *, with_source: bool = False) -> dict[str, Any]:
+        """What is loaded, as plain values for `triald.api.convert`.
+
+        A policy's `snapshot()` is somebody's Python and may raise; a session
+        that cannot describe its policy is still a session worth looking at, so
+        the failure costs the field rather than the answer.
+        """
         state = None
         with contextlib.suppress(Exception):
             state = self._policy.snapshot()
-        return sc.PolicyInfoModel(
-            name=self._policy_name,
-            class_name=type(self._policy).__name__,
-            sha256=self._policy_sha,
-            origin=self._policy_origin,
-            source=self._policy_source if with_source else None,
-            state=state,
-        )
+        return {
+            "name": self._policy_name,
+            "class_name": type(self._policy).__name__,
+            "sha256": self._policy_sha,
+            "origin": self._policy_origin,
+            "source": self._policy_source if with_source else None,
+            "state": state,
+        }
 
-    def check_policy(self, name: str, source: str) -> sc.PolicyCheckResult:
+    def check_policy(self, name: str, source: str) -> PolicyCheck:
         """Import `source` and smoke-run it, without touching the session.
 
         The diagnostics carry line numbers because the alternative - a traceback
@@ -530,9 +619,7 @@ class SessionService:
         sha = _sha256(source)
         syntax = _syntax_diagnostic(source, name)
         if syntax is not None:
-            return sc.PolicyCheckResult(
-                ok=False, class_name=None, sha256=sha, diagnostics=[syntax]
-            )
+            return PolicyCheck(ok=False, class_name=None, sha256=sha, diagnostics=[syntax])
 
         with tempfile.TemporaryDirectory(prefix="triald-policy-") as tmp:
             path = Path(tmp) / f"{_safe_stem(name)}_{sha[:12]}.py"
@@ -540,7 +627,7 @@ class SessionService:
             try:
                 policy = load_policy(path)
             except PolicyError as exc:
-                return sc.PolicyCheckResult(
+                return PolicyCheck(
                     ok=False,
                     class_name=None,
                     sha256=sha,
@@ -549,15 +636,17 @@ class SessionService:
 
             ran, errors = self._smoke_run(policy)
 
-        return sc.PolicyCheckResult(
+        return PolicyCheck(
             ok=not errors,
             class_name=type(policy).__name__,
             sha256=sha,
-            diagnostics=[sc.PolicyDiagnostic(message=e) for e in errors],
+            # No line number: the policy imported and then misbehaved, so there
+            # is nothing to point at in the source.
+            diagnostics=[(None, None, message) for message in errors],
             trials_run=ran,
         )
 
-    def load_policy_source(self, name: str, source: str) -> sc.PolicyInfoModel:
+    def load_policy_source(self, name: str, source: str) -> dict[str, Any]:
         """Store `source`, import it, and use it from the next arm onwards.
 
         The daemon holds the text rather than a path: a session record has to be
@@ -575,7 +664,7 @@ class SessionService:
 
         result = self.check_policy(name, source)
         if not result.ok:
-            first = result.diagnostics[0].message if result.diagnostics else "unknown error"
+            first = result.diagnostics[0][2] if result.diagnostics else "unknown error"
             raise ServiceError(
                 f"the policy did not pass its check, so it was not loaded: {first}",
                 kind="policy",
@@ -608,7 +697,7 @@ class SessionService:
             )
         return self.policy_info()
 
-    def clear_policy(self) -> sc.PolicyInfoModel:
+    def clear_policy(self) -> dict[str, Any]:
         """Go back to the declarative behaviour."""
         if self._session.running:
             raise ServiceError(
@@ -629,9 +718,11 @@ class SessionService:
         A copy, on its own seed, so a check never touches the counters of a
         session somebody is watching.
         """
-        config = sc.SessionConfigModel.of(self.config).build()
-        config.seed = 0
-        store = TrialTypeStore([sc.TrialTypeSetModel.of(s).build() for s in self.store.sets()])
+        # A deep copy, because the smoke run arms a session against it and a
+        # session mutates its config. This used to round-trip through the wire
+        # models to get one, which worked and hid what it was doing.
+        config = dataclasses.replace(copy.deepcopy(self.config), seed=0)
+        store = TrialTypeStore([copy.deepcopy(s) for s in self.store.sets()])
         session = Session(store, config, policy=policy)
         subject = SimulatedBehaviourSource(rng=random.Random(0))
 
@@ -648,14 +739,20 @@ class SessionService:
 
     # -- the state snapshot and the stream --------------------------------------
 
-    def state_model(self) -> sc.SessionStateModel:
-        return sc.SessionStateModel.of(
-            self._session.state(),
+    def snapshot(self) -> StateSnapshot:
+        """Everything the state message is assembled from, and nothing more.
+
+        The pieces rather than the message: this layer holds the session, and
+        `triald.api.convert` is the only thing that knows what a wire type
+        looks like.
+        """
+        return StateSnapshot(
+            state=self._session.state(),
             armed=self._session.armed,
             trial_type_set=self._session.trial_type_set,
-            config=sc.SessionConfigModel.of(self.config),
+            config=self.config,
             policy=self.policy_info(),
-            policy_errors=self._session.policy_errors,
+            policy_errors=list(self._session.policy_errors),
             number_offset=self._number_offset(),
         )
 
@@ -672,9 +769,9 @@ class SessionService:
         )
 
     @contextlib.contextmanager
-    def subscribe(self) -> Iterator[asyncio.Queue[sc.StreamMessage]]:
+    def subscribe(self) -> Iterator[asyncio.Queue[StreamFrame]]:
         """Register a queue for state frames, for as long as the block runs."""
-        queue: asyncio.Queue[sc.StreamMessage] = asyncio.Queue(maxsize=STREAM_BACKLOG)
+        queue: asyncio.Queue[StreamFrame] = asyncio.Queue(maxsize=STREAM_BACKLOG)
         self._subscribers.add(queue)
         try:
             yield queue
@@ -693,8 +790,8 @@ class SessionService:
             return
 
         self._sequence += 1
-        message = sc.StreamMessage(
-            sequence=self._sequence, at=self._clock(), state=self.state_model()
+        message = StreamFrame(
+            sequence=self._sequence, at=self._clock(), snapshot=self.snapshot()
         )
         for queue in list(self._subscribers):
             while True:
@@ -717,19 +814,22 @@ class SessionService:
 # -- policy diagnostics ---------------------------------------------------------
 
 
-def _syntax_diagnostic(source: str, name: str) -> sc.PolicyDiagnostic | None:
+#: One diagnostic: a line, a column, and what is wrong. A tuple rather than a
+#: type, because it is three values with no behaviour and it crosses one seam.
+Diagnostic = tuple[int | None, int | None, str]
+
+
+def _syntax_diagnostic(source: str, name: str) -> Diagnostic | None:
     try:
         compile(source, f"<{name}>", "exec")
     except SyntaxError as exc:
-        return sc.PolicyDiagnostic(
-            line=exc.lineno, column=exc.offset, message=f"{type(exc).__name__}: {exc.msg}"
-        )
+        return (exc.lineno, exc.offset, f"{type(exc).__name__}: {exc.msg}")
     except ValueError as exc:  # null bytes, and other things compile() refuses
-        return sc.PolicyDiagnostic(message=f"{type(exc).__name__}: {exc}")
+        return (None, None, f"{type(exc).__name__}: {exc}")
     return None
 
 
-def _diagnostic_from_exception(exc: Exception, path: Path) -> sc.PolicyDiagnostic:
+def _diagnostic_from_exception(exc: Exception, path: Path) -> Diagnostic:
     """Point at the last line *in the policy* that the traceback passed through.
 
     The deepest frame is usually inside the standard library or triald itself,
@@ -743,7 +843,7 @@ def _diagnostic_from_exception(exc: Exception, path: Path) -> sc.PolicyDiagnosti
         ),
         None,
     )
-    return sc.PolicyDiagnostic(line=line, message=str(exc))
+    return (line, None, str(exc))
 
 
 def _sha256(source: str) -> str:

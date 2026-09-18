@@ -142,6 +142,13 @@ ignore = [
 include = ["src"]
 exclude = ["src/triald/_proto"]
 
+# **ty cannot see `triald.v1`, and that is expected.** The generated modules
+# reach each other by that name because `triald/__init__.py` extends `__path__`
+# at import time, which is a runtime fact a static checker has no way to follow
+# — vstimd's client has the same arrangement and the same blind spot. The
+# imports are exercised by the test suite instead, which is the check that
+# actually runs the code.
+
 [tool.uv.sources]
 # statemachined's Python package, from its repo, for the same reason vstimd's
 # client is below: it is not on a package registry. `main` rather than a tag
