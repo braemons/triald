@@ -19,8 +19,11 @@ import pytest
 
 pytest.importorskip("google.protobuf", reason="the wire types need the serve extra")
 
-from triald.api import wire  # noqa: E402
-from triald.v1 import config_pb2, outcomes_pb2, session_pb2, trial_pb2  # noqa: E402
+# Below the skip on purpose, so a checkout without the `serve` extra skips this
+# file rather than failing to collect it. ruff wants one import block at the
+# top and cannot be given one here.
+from triald.api import wire  # noqa: I001
+from triald.v1 import config_pb2, outcomes_pb2, session_pb2, trial_pb2
 
 
 def as_dict(message) -> dict:

@@ -21,12 +21,8 @@ neighbours are what the daemon thinks in.
 
 from __future__ import annotations
 
-from typing import TypeVar
-
 from google.protobuf import json_format
 from google.protobuf.message import Message
-
-M = TypeVar("M", bound=Message)
 
 
 def to_json(message: Message) -> str:
@@ -55,7 +51,7 @@ def to_json(message: Message) -> str:
     )
 
 
-def from_json(text: str | bytes, message_type: type[M]) -> M:
+def from_json[M: Message](text: str | bytes, message_type: type[M]) -> M:
     """One wire message, parsed, refusing anything it does not understand.
 
     Unknown fields are an error rather than ignored: a typo in a config

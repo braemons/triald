@@ -26,7 +26,7 @@ from __future__ import annotations
 # same reason.
 import os as _os
 
-__path__ = list(__path__) + [_os.path.join(_os.path.dirname(__file__), "_proto", "triald")]
+__path__ = [*__path__, _os.path.join(_os.path.dirname(__file__), "_proto", "triald")]
 
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _installed_version
