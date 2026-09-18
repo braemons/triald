@@ -8,7 +8,7 @@
 # it is not.
 
 .PHONY: help sync test lint fmt typecheck check sim clean version \
-        check-proto deb wheel packages package-check
+        proto check-proto deb wheel packages package-check
 
 help:
 	@echo "make sync       install the dev environment"
@@ -17,7 +17,8 @@ help:
 	@echo "make fmt        ruff format"
 	@echo "make typecheck  ty check"
 	@echo "make check      lint + typecheck + test + the proto + a simulated session"
-	@echo "make check-proto  the proto compiles, and the taxonomy and routes match it"
+	@echo "make proto      regenerate daemon/src/triald/_proto/ from proto/"
+	@echo "make check-proto  the proto compiles, is current, and matches the taxonomy and routes"
 	@echo "make sim        run a simulated session"
 	@echo "make version    the version the git tag implies"
 	@echo ""
@@ -52,9 +53,35 @@ typecheck:
 # does not parse; check_outcomes.py catches a copy of the taxonomy that drifted
 # from the enum; and check_routes.py catches a handler decorated into the router
 # with no rpc above it — public API that exists and is written down nowhere.
-check-proto: ## the proto compiles, and the taxonomy and routes match it
+# The generated code is committed, so a checkout runs without protoc and an
+# interface change arrives as a diff a reviewer can read
+# (contracts/DAEMON_LAYOUT.md).
+#
+# service.proto is not generated, and that is not an oversight: it declares
+# behaviour, this family runs no gRPC, and protobuf's Python output for a
+# service is a descriptor with no stubs. Generating it would only drag
+# braemons/v1/route.proto into the runtime import path for nothing.
+proto: ## regenerate daemon/src/triald/_proto/ from proto/
+	@protoc --proto_path=proto --python_out=daemon/src/triald/_proto $(MESSAGE_PROTOS)
+	@echo "daemon/src/triald/_proto/"
+
+MESSAGE_PROTOS := $(filter-out proto/triald/v1/service.proto,$(wildcard proto/triald/v1/*.proto))
+
+check-proto: ## the proto compiles, is current, and matches the taxonomy and routes
 	@protoc --proto_path=proto --descriptor_set_out=/dev/null \
 	  proto/triald/v1/*.proto proto/braemons/v1/route.proto
+	@# Into a scratch directory and compared, rather than regenerated in place
+	@# and handed to `git diff`: the git version is vacuous for a file git does
+	@# not track yet, which is exactly when a new generator is least trusted.
+	@rm -rf build/proto-check && mkdir -p build/proto-check
+	@protoc --proto_path=proto --python_out=build/proto-check $(MESSAGE_PROTOS)
+	@diff -r -x '__pycache__' build/proto-check daemon/src/triald/_proto >/dev/null || { \
+	  echo "daemon/src/triald/_proto/ is not what proto/ produces — the interface changed:"; \
+	  diff -rq -x '__pycache__' build/proto-check daemon/src/triald/_proto || true; \
+	  echo "run 'make proto' and commit the result with the change that caused it."; \
+	  exit 1; \
+	}
+	@rm -rf build/proto-check
 	@python3 tools/check_outcomes.py
 	@python3 tools/check_routes.py
 

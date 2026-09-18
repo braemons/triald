@@ -16,6 +16,18 @@ The public surface is what a policy needs:
 
 from __future__ import annotations
 
+# Let `from triald.v1 import common_pb2` — which is what the generated modules
+# write to reach each other — resolve inside `_proto/` without those modules
+# appearing in this package's own namespace.
+#
+# **The generated types are private and stay private.** They are the shapes on
+# the wire; `triald.api.convert` is the seam, and nothing a person imports from
+# `triald` is a protobuf message. vstimd's client does exactly this and for the
+# same reason.
+import os as _os
+
+__path__ = list(__path__) + [_os.path.join(_os.path.dirname(__file__), "_proto", "triald")]
+
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _installed_version
 
