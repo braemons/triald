@@ -65,10 +65,11 @@ WORKDIR /src
 
 # The build recipes live in packaging/Makefile rather than being restated here,
 # so there is one definition of how the package is assembled.
-COPY README.md LICENSE pyproject.toml uv.lock ./
+COPY README.md LICENSE ./
+COPY daemon/      daemon/
+COPY client/      client/
 COPY dev/         dev/
 COPY packaging/   packaging/
-COPY src/         src/
 
 # Declared *here* rather than beside the other ARGs at the top, because an ARG
 # invalidates its own layer and every layer after it. The version changes with

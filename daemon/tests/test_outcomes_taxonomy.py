@@ -24,6 +24,11 @@ sys.path.insert(0, str(CONTRACTS))
 import check_outcomes as check  # noqa: E402
 
 SOURCE = Path(__file__).resolve().parents[1] / "src" / "triald"
+#: The panels are a sibling of the daemon, not part of its package
+#: (`contracts/DAEMON_LAYOUT.md`), so this test reaches across the repository to
+#: them — which is the point: the outcome table appears in both, and the whole
+#: reason for this file is that the two copies cannot be allowed to drift.
+PANELS = Path(__file__).resolve().parents[2] / "client" / "web" / "elements"
 
 
 def taxonomy() -> dict:
@@ -41,10 +46,10 @@ def test_the_enum_is_the_canonical_table():
 def test_the_counters_table_has_a_column_for_every_outcome_a_trial_can_carry():
     # Not UNDETERMINED: nobody assigns it, so the column would always read zero
     # and invite the question of what it meant.
-    panel = (SOURCE / "web" / "elements" / "counters_panel_element.js").read_text()
+    panel = (PANELS / "counters_panel_element.js").read_text()
     problems = check.countable_problems(
         taxonomy(),
-        "web/elements/counters_panel_element.js OUTCOME_COLUMNS",
+        "client/web/elements/counters_panel_element.js OUTCOME_COLUMNS",
         check.javascript_names(panel, "OUTCOME_COLUMNS"),
     )
     assert not problems, "\n".join(problems)

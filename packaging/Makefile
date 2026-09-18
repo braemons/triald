@@ -177,28 +177,38 @@ deb rpm: export TRIALD_PKG_VERSION = $(VERSION)
 # stamped copy for the same reason the package is: pyproject.toml carries the
 # 0.0.0 sentinel in the repository, and a build must never leave the working
 # tree dirty.
-wheel: $(SRC)/pyproject.toml  ## the wheel and the sdist, stamped, into dist/
+wheel: $(SRC)/daemon/pyproject.toml  ## the wheel and the sdist, stamped, into dist/
 	@mkdir -p $(DIST_DIR)
-	$(UV) build --project $(SRC) --out-dir $(DIST_DIR)
+	$(UV) build --project $(SRC)/daemon --out-dir $(DIST_DIR)
 	@ls -1 $(DIST_DIR)/*.whl $(DIST_DIR)/*.tar.gz
 
 # ── The staged tree ─────────────────────────────────────────────────────────
 
 # The source, with the version stamped in. Separate from the tree below because
 # `wheel` needs it and does not need a vendored interpreter.
-$(SRC)/pyproject.toml: $(shell find $(ROOT)/src -type f) $(ROOT)/pyproject.toml
+#
+# **The panels are copied into the package here.** They are authored in
+# `client/web/`, a sibling of `daemon/` (contracts/DAEMON_LAYOUT.md), and Python
+# ships data inside a package — so somewhere between the two a copy has to
+# happen, and this is the only place it can. hatchling's force-include reaches
+# outside the project and looks like the answer, but `uv build` builds the wheel
+# from the sdist and an sdist cannot hold a path above its own root; the wheel
+# then fails on a machine that never saw the repository. A copy into the staged
+# tree has no such cleverness in it.
+$(SRC)/daemon/pyproject.toml: $(shell find $(ROOT)/daemon/src $(ROOT)/client -type f) $(ROOT)/daemon/pyproject.toml
 	rm -rf $(SRC)
 	@mkdir -p $(SRC)
-	cp -a $(ROOT)/src $(ROOT)/pyproject.toml $(ROOT)/README.md $(ROOT)/LICENSE $(SRC)/
-	sed -i 's/^version = "0.0.0"$$/version = "$(PY_VERSION)"/' $(SRC)/pyproject.toml
-	@grep -q '^version = "$(PY_VERSION)"$$' $(SRC)/pyproject.toml || { \
+	cp -a $(ROOT)/daemon $(SRC)/
+	cp -a $(ROOT)/client/web $(SRC)/daemon/src/triald/web
+	sed -i 's/^version = "0.0.0"$$/version = "$(PY_VERSION)"/' $(SRC)/daemon/pyproject.toml
+	@grep -q '^version = "$(PY_VERSION)"$$' $(SRC)/daemon/pyproject.toml || { \
 	  echo "error: the version sentinel in pyproject.toml did not match."; \
 	  echo "       Nothing was stamped, and a 0.0.0 artifact is one nobody"; \
 	  echo "       can correlate with a commit. Fix the sed above."; exit 1; }
 	@touch $@
 
 stage: $(STAGE)/.stamp      ## build the tree the package is cut from
-$(STAGE)/.stamp: $(SRC)/pyproject.toml
+$(STAGE)/.stamp: $(SRC)/daemon/pyproject.toml
 	@test -n "$(ARCH)" || { \
 	  echo "error: no nfpm architecture known for $(UNAME_M)."; \
 	  echo "       Build on the target architecture, or add it above."; exit 1; }
@@ -222,7 +232,7 @@ $(STAGE)/.stamp: $(SRC)/pyproject.toml
 	@#  difference between "reproducible" and "reproducible this afternoon".
 	@#  Exported from the unmodified root because that is where the lock matches
 	@#  its pyproject; the project itself then goes in --no-deps.
-	$(UV) export --project $(ROOT) --frozen --extra serve --no-default-groups \
+	$(UV) export --project $(ROOT)/daemon --frozen --extra serve --no-default-groups \
 	  --no-emit-project --no-header --no-annotate \
 	  --format requirements.txt -o $(BUILD)/requirements.txt
 	$(UV) pip install --python $(STAGE)$(PREFIX)/bin/python3 \
@@ -231,7 +241,7 @@ $(STAGE)/.stamp: $(SRC)/pyproject.toml
 	$(UV) pip install --python $(STAGE)$(PREFIX)/bin/python3 \
 	  --link-mode=copy --no-cache --quiet $(RIG_EXTRAS)
 	$(UV) pip install --python $(STAGE)$(PREFIX)/bin/python3 \
-	  --link-mode=copy --no-cache --quiet --no-deps $(SRC)
+	  --link-mode=copy --no-cache --quiet --no-deps $(SRC)/daemon
 
 	@#  Nothing in here is a development environment: no headers, no pip, no
 	@#  tkinter, and no console scripts but ours -- the ones uv writes carry the

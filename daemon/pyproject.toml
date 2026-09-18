@@ -87,6 +87,21 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/triald"]
 
+# **The panels are not listed here, and that is deliberate.**
+#
+# They are authored in `client/web/`, a sibling of `daemon/` rather than a
+# subdirectory of it, so that somebody looking for this daemon's UI finds it
+# without knowing how the Python package is laid out
+# (`contracts/DAEMON_LAYOUT.md`). hatchling can force-include a path from
+# outside the project, and it is a trap: `uv build` builds the wheel *from the
+# sdist*, an sdist cannot contain a path above its own root, and the wheel then
+# fails on a machine that never saw the repository.
+#
+# So `packaging/Makefile` copies `client/web` into the staged package before
+# building, and `api/app.py` falls back to the authored location when no copy
+# has been made — which is every editable install, and therefore every
+# developer. Build with `make wheel`, not `uv build`.
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --strict-markers"

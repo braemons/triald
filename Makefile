@@ -1,5 +1,11 @@
 # Convenience wrappers. Everything here is `uv` underneath; run the uv commands
 # directly if you prefer.
+#
+# `--directory daemon` on every one of them: the Python project is `daemon/`,
+# beside `client/` and `proto/`, so that this repository has the shape every
+# braemons daemon repository has (contracts/DAEMON_LAYOUT.md). The alternative
+# was a pyproject.toml at the root claiming the whole tree is one package, which
+# it is not.
 
 .PHONY: help sync test lint fmt typecheck check sim clean version \
         deb wheel packages package-check
@@ -21,28 +27,28 @@ help:
 	@echo "make package-check  stage the tree and run it, packaging nothing"
 
 sync:
-	uv sync --group dev
+	uv sync --directory daemon --extra serve --group dev
 
 test:
-	uv run pytest
+	uv run --directory daemon pytest
 
 lint:
-	uv run ruff check .
-	uv run ruff format --check .
+	uv run --directory daemon ruff check .
+	uv run --directory daemon ruff format --check .
 
 fmt:
-	uv run ruff format .
+	uv run --directory daemon ruff format .
 
 typecheck:
-	uv run ty check
+	uv run --directory daemon ty check
 
 # What CI runs. The simulated session is the end-to-end smoke test.
 check: lint typecheck test
-	uv run triald sim --trials 200
-	uv run triald policy check examples/staircase.py --trial-types contrast_0,contrast_1,contrast_2,contrast_3,contrast_4,contrast_5
+	uv run --directory daemon triald sim --trials 200
+	uv run --directory daemon triald policy check ../examples/staircase.py --trial-types contrast_0,contrast_1,contrast_2,contrast_3,contrast_4,contrast_5
 
 sim:
-	uv run triald sim --trials 200 --trace
+	uv run --directory daemon triald sim --trials 200 --trace
 
 version:
 	@sh packaging/scripts/git-version.sh

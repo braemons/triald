@@ -40,7 +40,28 @@ from triald.trialtypes import TrialTypeStore
 
 log = logging.getLogger(__name__)
 
-WEB_ROOT = Path(__file__).resolve().parent.parent / "web"
+
+def _find_web_root() -> Path:
+    """Where the panels are, installed or in a checkout.
+
+    The panels are authored in ``client/web/`` -- a sibling of ``daemon/``, not
+    a subdirectory of it, because talking to a rig should not mean installing
+    one (``contracts/DAEMON_LAYOUT.md``). A wheel cannot ship a directory from
+    outside its package, so the build copies it to ``triald/web`` and the
+    installed daemon finds it there.
+
+    An *editable* install applies no such copy, which is the case a developer
+    is always in: there, the only copy is the authored one, four levels up.
+    Trying the packaged location first means a real install never touches the
+    filesystem outside itself.
+    """
+    packaged = Path(__file__).resolve().parent.parent / "web"
+    if packaged.is_dir():
+        return packaged
+    return Path(__file__).resolve().parents[4] / "client" / "web"
+
+
+WEB_ROOT = _find_web_root()
 
 #: Enough to serve what this UI is made of, and no more. An unknown suffix is
 #: refused rather than served as a guess.
