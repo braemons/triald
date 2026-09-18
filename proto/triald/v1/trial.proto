@@ -4,6 +4,7 @@ syntax = "proto3";
 package triald.v1;
 
 import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
 import "triald/v1/common.proto";
 import "triald/v1/outcomes.proto";
 
@@ -83,12 +84,11 @@ message TrialSpec {
   bool recording = 8;
   bool paused = 9;
 
-  // ISO 8601, spelled as `datetime.isoformat()` spells it — `+00:00` and not a
-  // trailing `Z`. A string rather than `google.protobuf.Timestamp` for exactly
-  // that reason: the same instant either way, but not the same bytes, and the
-  // session record has years of files behind it.
-  string started_at = 10 [json_name = "started_at"];
-  optional string deadline = 11;
+  // RFC 3339, which is what `google.protobuf.Timestamp` puts on the wire:
+  // `2026-09-18T12:00:00Z`. A typed instant rather than a string, so a client
+  // gets a datetime from its generator rather than something to parse.
+  google.protobuf.Timestamp started_at = 10 [json_name = "started_at"];
+  optional google.protobuf.Timestamp deadline = 11;
 }
 
 // One finished trial.
@@ -101,7 +101,7 @@ message TrialRecord {
   Outcome outcome = 2;
   bool accepted = 3;
   optional string refusal_reason = 4 [json_name = "refusal_reason"];
-  string ended_at = 5 [json_name = "ended_at"];
+  google.protobuf.Timestamp ended_at = 5 [json_name = "ended_at"];
 
   // Whatever the policy's `snapshot()` returned at the end of this trial.
   // Arbitrary, because a policy is somebody's Python and the daemon never

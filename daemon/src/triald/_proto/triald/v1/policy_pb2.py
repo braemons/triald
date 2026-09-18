@@ -12,25 +12,26 @@ _sym_db = _symbol_database.Default()
 
 
 from google.protobuf import struct_pb2 as google_dot_protobuf_dot_struct__pb2
+from google.protobuf import timestamp_pb2 as google_dot_protobuf_dot_timestamp__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x16triald/v1/policy.proto\x12\ttriald.v1\x1a\x1cgoogle/protobuf/struct.proto\"\xda\x01\n\nPolicyInfo\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x1e\n\nclass_name\x18\x02 \x01(\tR\nclass_name\x12\x13\n\x06sha256\x18\x03 \x01(\tH\x00\x88\x01\x01\x12\'\n\x06origin\x18\x04 \x01(\x0e\x32\x17.triald.v1.PolicyOrigin\x12\x13\n\x06source\x18\x05 \x01(\tH\x01\x88\x01\x01\x12+\n\x05state\x18\x06 \x01(\x0b\x32\x17.google.protobuf.StructH\x02\x88\x01\x01\x42\t\n\x07_sha256B\t\n\x07_sourceB\x08\n\x06_state\",\n\x0cPolicySource\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x0e\n\x06source\x18\x02 \x01(\t\"_\n\x10PolicyDiagnostic\x12\x11\n\x04line\x18\x01 \x01(\x05H\x00\x88\x01\x01\x12\x13\n\x06\x63olumn\x18\x02 \x01(\x05H\x01\x88\x01\x01\x12\x0f\n\x07message\x18\x03 \x01(\tB\x07\n\x05_lineB\t\n\x07_column\"\xb5\x01\n\x11PolicyCheckResult\x12\n\n\x02ok\x18\x01 \x01(\x08\x12#\n\nclass_name\x18\x02 \x01(\tH\x00R\nclass_name\x88\x01\x01\x12\x0e\n\x06sha256\x18\x03 \x01(\t\x12\x30\n\x0b\x64iagnostics\x18\x04 \x03(\x0b\x32\x1b.triald.v1.PolicyDiagnostic\x12\x1e\n\ntrials_run\x18\x05 \x01(\x05R\ntrials_runB\r\n\x0b_class_name\"m\n\x0bPolicyError\x12\x0c\n\x04hook\x18\x01 \x01(\t\x12\"\n\x0ctrial_number\x18\x02 \x01(\x03R\x0ctrial_number\x12\r\n\x05\x65rror\x18\x03 \x01(\t\x12\x11\n\ttraceback\x18\x04 \x01(\t\x12\n\n\x02\x61t\x18\x05 \x01(\t*|\n\x0cPolicyOrigin\x12\x1d\n\x19POLICY_ORIGIN_UNSPECIFIED\x10\x00\x12\x19\n\x15POLICY_ORIGIN_DEFAULT\x10\x01\x12\x16\n\x12POLICY_ORIGIN_FILE\x10\x02\x12\x1a\n\x16POLICY_ORIGIN_UPLOADED\x10\x03\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x16triald/v1/policy.proto\x12\ttriald.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xda\x01\n\nPolicyInfo\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x1e\n\nclass_name\x18\x02 \x01(\tR\nclass_name\x12\x13\n\x06sha256\x18\x03 \x01(\tH\x00\x88\x01\x01\x12\'\n\x06origin\x18\x04 \x01(\x0e\x32\x17.triald.v1.PolicyOrigin\x12\x13\n\x06source\x18\x05 \x01(\tH\x01\x88\x01\x01\x12+\n\x05state\x18\x06 \x01(\x0b\x32\x17.google.protobuf.StructH\x02\x88\x01\x01\x42\t\n\x07_sha256B\t\n\x07_sourceB\x08\n\x06_state\",\n\x0cPolicySource\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x0e\n\x06source\x18\x02 \x01(\t\"_\n\x10PolicyDiagnostic\x12\x11\n\x04line\x18\x01 \x01(\x05H\x00\x88\x01\x01\x12\x13\n\x06\x63olumn\x18\x02 \x01(\x05H\x01\x88\x01\x01\x12\x0f\n\x07message\x18\x03 \x01(\tB\x07\n\x05_lineB\t\n\x07_column\"\xb5\x01\n\x11PolicyCheckResult\x12\n\n\x02ok\x18\x01 \x01(\x08\x12#\n\nclass_name\x18\x02 \x01(\tH\x00R\nclass_name\x88\x01\x01\x12\x0e\n\x06sha256\x18\x03 \x01(\t\x12\x30\n\x0b\x64iagnostics\x18\x04 \x03(\x0b\x32\x1b.triald.v1.PolicyDiagnostic\x12\x1e\n\ntrials_run\x18\x05 \x01(\x05R\ntrials_runB\r\n\x0b_class_name\"\x89\x01\n\x0bPolicyError\x12\x0c\n\x04hook\x18\x01 \x01(\t\x12\"\n\x0ctrial_number\x18\x02 \x01(\x03R\x0ctrial_number\x12\r\n\x05\x65rror\x18\x03 \x01(\t\x12\x11\n\ttraceback\x18\x04 \x01(\t\x12&\n\x02\x61t\x18\x05 \x01(\x0b\x32\x1a.google.protobuf.Timestamp*|\n\x0cPolicyOrigin\x12\x1d\n\x19POLICY_ORIGIN_UNSPECIFIED\x10\x00\x12\x19\n\x15POLICY_ORIGIN_DEFAULT\x10\x01\x12\x16\n\x12POLICY_ORIGIN_FILE\x10\x02\x12\x1a\n\x16POLICY_ORIGIN_UPLOADED\x10\x03\x62\x06proto3')
 
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, globals())
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'triald.v1.policy_pb2', globals())
 if _descriptor._USE_C_DESCRIPTORS == False:
 
   DESCRIPTOR._options = None
-  _POLICYORIGIN._serialized_start=726
-  _POLICYORIGIN._serialized_end=850
-  _POLICYINFO._serialized_start=68
-  _POLICYINFO._serialized_end=286
-  _POLICYSOURCE._serialized_start=288
-  _POLICYSOURCE._serialized_end=332
-  _POLICYDIAGNOSTIC._serialized_start=334
-  _POLICYDIAGNOSTIC._serialized_end=429
-  _POLICYCHECKRESULT._serialized_start=432
-  _POLICYCHECKRESULT._serialized_end=613
-  _POLICYERROR._serialized_start=615
-  _POLICYERROR._serialized_end=724
+  _POLICYORIGIN._serialized_start=788
+  _POLICYORIGIN._serialized_end=912
+  _POLICYINFO._serialized_start=101
+  _POLICYINFO._serialized_end=319
+  _POLICYSOURCE._serialized_start=321
+  _POLICYSOURCE._serialized_end=365
+  _POLICYDIAGNOSTIC._serialized_start=367
+  _POLICYDIAGNOSTIC._serialized_end=462
+  _POLICYCHECKRESULT._serialized_start=465
+  _POLICYCHECKRESULT._serialized_end=646
+  _POLICYERROR._serialized_start=649
+  _POLICYERROR._serialized_end=786
 # @@protoc_insertion_point(module_scope)

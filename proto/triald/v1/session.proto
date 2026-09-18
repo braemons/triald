@@ -3,6 +3,7 @@ syntax = "proto3";
 
 package triald.v1;
 
+import "google/protobuf/timestamp.proto";
 import "triald/v1/common.proto";
 import "triald/v1/config.proto";
 import "triald/v1/policy.proto";
@@ -118,7 +119,7 @@ message StreamFrame {
   // Monotonic; a gap means frames were coalesced.
   int64 sequence = 1;
 
-  string at = 2;
+  google.protobuf.Timestamp at = 2;
 
   oneof frame {
     SessionState state = 3;

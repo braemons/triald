@@ -4,6 +4,7 @@ syntax = "proto3";
 package triald.v1;
 
 import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
 
 // The policy the session is running.
 message PolicyInfo {
@@ -69,5 +70,5 @@ message PolicyError {
   int64 trial_number = 2 [json_name = "trial_number"];
   string error = 3;
   string traceback = 4;
-  string at = 5;
+  google.protobuf.Timestamp at = 5;
 }

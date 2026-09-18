@@ -12,27 +12,28 @@ _sym_db = _symbol_database.Default()
 
 
 from google.protobuf import struct_pb2 as google_dot_protobuf_dot_struct__pb2
+from google.protobuf import timestamp_pb2 as google_dot_protobuf_dot_timestamp__pb2
 from triald.v1 import common_pb2 as triald_dot_v1_dot_common__pb2
 from triald.v1 import outcomes_pb2 as triald_dot_v1_dot_outcomes__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x15triald/v1/trial.proto\x12\ttriald.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x16triald/v1/common.proto\x1a\x18triald/v1/outcomes.proto\",\n\tFrameLoss\x12\x10\n\x08interval\x18\x01 \x01(\x05\x12\r\n\x05\x66rame\x18\x02 \x01(\x05\"\x9f\x04\n\rOutcomeReport\x12\x1a\n\x08trial_id\x18\x01 \x01(\x03R\x08trial_id\x12(\n\x07outcome\x18\x02 \x01(\x0e\x32\x17.triald.v1.TrialOutcome\x12-\n\x0cmanipulandum\x18\x03 \x01(\x0e\x32\x17.triald.v1.Manipulandum\x12/\n\x10reaction_time_ms\x18\x04 \x01(\x01H\x00R\x10reaction_time_ms\x88\x01\x01\x12\x37\n\x14terminating_interval\x18\x05 \x01(\x05H\x01R\x14terminating_interval\x88\x01\x01\x12/\n\x10precise_fixation\x18\x06 \x01(\x08H\x02R\x10precise_fixation\x88\x01\x01\x12\x39\n\nframe_loss\x18\x07 \x01(\x0b\x32\x14.triald.v1.FrameLossH\x03R\nframe_loss\x88\x01\x01\x12\x1c\n\treward_ms\x18\x08 \x01(\x05R\treward_ms\x12$\n\rhit_condition\x18\t \x01(\x08R\rhit_condition\x12\x11\n\tsimulated\x18\n \x01(\x08\x12\x11\n\x04note\x18\x0b \x01(\tH\x04\x88\x01\x01\x42\x13\n\x11_reaction_time_msB\x17\n\x15_terminating_intervalB\x13\n\x11_precise_fixationB\r\n\x0b_frame_lossB\x07\n\x05_note\"\xbc\x03\n\x07Outcome\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x14\n\x0cmanipulandum\x18\x03 \x01(\t\x12/\n\x10reaction_time_ms\x18\x04 \x01(\x01H\x00R\x10reaction_time_ms\x88\x01\x01\x12\x37\n\x14terminating_interval\x18\x05 \x01(\x05H\x01R\x14terminating_interval\x88\x01\x01\x12*\n\x10precise_fixation\x18\x06 \x01(\x08R\x10precise_fixation\x12\x39\n\nframe_loss\x18\x07 \x01(\x0b\x32\x14.triald.v1.FrameLossH\x02R\nframe_loss\x88\x01\x01\x12\x1c\n\treward_ms\x18\x08 \x01(\x05R\treward_ms\x12$\n\rhit_condition\x18\t \x01(\x08R\rhit_condition\x12\x11\n\tsimulated\x18\n \x01(\x08\x12\x11\n\x04note\x18\x0b \x01(\tH\x03\x88\x01\x01\x42\x13\n\x11_reaction_time_msB\x17\n\x15_terminating_intervalB\r\n\x0b_frame_lossB\x07\n\x05_note\"\x84\x03\n\tTrialSpec\x12\"\n\x0ctrial_number\x18\x01 \x01(\x03R\x0ctrial_number\x12*\n\x10trial_type_index\x18\x02 \x01(\x05R\x10trial_type_index\x12,\n\x11trial_type_number\x18\x03 \x01(\x05R\x11trial_type_number\x12(\n\x0ftrial_type_name\x18\x04 \x01(\tR\x0ftrial_type_name\x12\x1a\n\x08set_name\x18\x05 \x01(\tR\x08set_name\x12.\n\x12statemachine_graph\x18\x06 \x01(\tR\x12statemachine_graph\x12\x1c\n\treward_ms\x18\x07 \x01(\x05R\treward_ms\x12\x11\n\trecording\x18\x08 \x01(\x08\x12\x0e\n\x06paused\x18\t \x01(\x08\x12\x1e\n\nstarted_at\x18\n \x01(\tR\nstarted_at\x12\x15\n\x08\x64\x65\x61\x64line\x18\x0b \x01(\tH\x00\x88\x01\x01\x42\x0b\n\t_deadline\"\x98\x02\n\x0bTrialRecord\x12#\n\x05trial\x18\x01 \x01(\x0b\x32\x14.triald.v1.TrialSpec\x12#\n\x07outcome\x18\x02 \x01(\x0b\x32\x12.triald.v1.Outcome\x12\x10\n\x08\x61\x63\x63\x65pted\x18\x03 \x01(\x08\x12+\n\x0erefusal_reason\x18\x04 \x01(\tH\x00R\x0erefusal_reason\x88\x01\x01\x12\x1a\n\x08\x65nded_at\x18\x05 \x01(\tR\x08\x65nded_at\x12@\n\x0cpolicy_state\x18\x06 \x01(\x0b\x32\x17.google.protobuf.StructH\x01R\x0cpolicy_state\x88\x01\x01\x42\x11\n\x0f_refusal_reasonB\x0f\n\r_policy_state\"\x1d\n\x0b\x43\x61ncelTrial\x12\x0e\n\x06reason\x18\x01 \x01(\tb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x15triald/v1/trial.proto\x12\ttriald.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x16triald/v1/common.proto\x1a\x18triald/v1/outcomes.proto\",\n\tFrameLoss\x12\x10\n\x08interval\x18\x01 \x01(\x05\x12\r\n\x05\x66rame\x18\x02 \x01(\x05\"\x9f\x04\n\rOutcomeReport\x12\x1a\n\x08trial_id\x18\x01 \x01(\x03R\x08trial_id\x12(\n\x07outcome\x18\x02 \x01(\x0e\x32\x17.triald.v1.TrialOutcome\x12-\n\x0cmanipulandum\x18\x03 \x01(\x0e\x32\x17.triald.v1.Manipulandum\x12/\n\x10reaction_time_ms\x18\x04 \x01(\x01H\x00R\x10reaction_time_ms\x88\x01\x01\x12\x37\n\x14terminating_interval\x18\x05 \x01(\x05H\x01R\x14terminating_interval\x88\x01\x01\x12/\n\x10precise_fixation\x18\x06 \x01(\x08H\x02R\x10precise_fixation\x88\x01\x01\x12\x39\n\nframe_loss\x18\x07 \x01(\x0b\x32\x14.triald.v1.FrameLossH\x03R\nframe_loss\x88\x01\x01\x12\x1c\n\treward_ms\x18\x08 \x01(\x05R\treward_ms\x12$\n\rhit_condition\x18\t \x01(\x08R\rhit_condition\x12\x11\n\tsimulated\x18\n \x01(\x08\x12\x11\n\x04note\x18\x0b \x01(\tH\x04\x88\x01\x01\x42\x13\n\x11_reaction_time_msB\x17\n\x15_terminating_intervalB\x13\n\x11_precise_fixationB\r\n\x0b_frame_lossB\x07\n\x05_note\"\xbc\x03\n\x07Outcome\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x14\n\x0cmanipulandum\x18\x03 \x01(\t\x12/\n\x10reaction_time_ms\x18\x04 \x01(\x01H\x00R\x10reaction_time_ms\x88\x01\x01\x12\x37\n\x14terminating_interval\x18\x05 \x01(\x05H\x01R\x14terminating_interval\x88\x01\x01\x12*\n\x10precise_fixation\x18\x06 \x01(\x08R\x10precise_fixation\x12\x39\n\nframe_loss\x18\x07 \x01(\x0b\x32\x14.triald.v1.FrameLossH\x02R\nframe_loss\x88\x01\x01\x12\x1c\n\treward_ms\x18\x08 \x01(\x05R\treward_ms\x12$\n\rhit_condition\x18\t \x01(\x08R\rhit_condition\x12\x11\n\tsimulated\x18\n \x01(\x08\x12\x11\n\x04note\x18\x0b \x01(\tH\x03\x88\x01\x01\x42\x13\n\x11_reaction_time_msB\x17\n\x15_terminating_intervalB\r\n\x0b_frame_lossB\x07\n\x05_note\"\xbc\x03\n\tTrialSpec\x12\"\n\x0ctrial_number\x18\x01 \x01(\x03R\x0ctrial_number\x12*\n\x10trial_type_index\x18\x02 \x01(\x05R\x10trial_type_index\x12,\n\x11trial_type_number\x18\x03 \x01(\x05R\x11trial_type_number\x12(\n\x0ftrial_type_name\x18\x04 \x01(\tR\x0ftrial_type_name\x12\x1a\n\x08set_name\x18\x05 \x01(\tR\x08set_name\x12.\n\x12statemachine_graph\x18\x06 \x01(\tR\x12statemachine_graph\x12\x1c\n\treward_ms\x18\x07 \x01(\x05R\treward_ms\x12\x11\n\trecording\x18\x08 \x01(\x08\x12\x0e\n\x06paused\x18\t \x01(\x08\x12:\n\nstarted_at\x18\n \x01(\x0b\x32\x1a.google.protobuf.TimestampR\nstarted_at\x12\x31\n\x08\x64\x65\x61\x64line\x18\x0b \x01(\x0b\x32\x1a.google.protobuf.TimestampH\x00\x88\x01\x01\x42\x0b\n\t_deadline\"\xb4\x02\n\x0bTrialRecord\x12#\n\x05trial\x18\x01 \x01(\x0b\x32\x14.triald.v1.TrialSpec\x12#\n\x07outcome\x18\x02 \x01(\x0b\x32\x12.triald.v1.Outcome\x12\x10\n\x08\x61\x63\x63\x65pted\x18\x03 \x01(\x08\x12+\n\x0erefusal_reason\x18\x04 \x01(\tH\x00R\x0erefusal_reason\x88\x01\x01\x12\x36\n\x08\x65nded_at\x18\x05 \x01(\x0b\x32\x1a.google.protobuf.TimestampR\x08\x65nded_at\x12@\n\x0cpolicy_state\x18\x06 \x01(\x0b\x32\x17.google.protobuf.StructH\x01R\x0cpolicy_state\x88\x01\x01\x42\x11\n\x0f_refusal_reasonB\x0f\n\r_policy_state\"\x1d\n\x0b\x43\x61ncelTrial\x12\x0e\n\x06reason\x18\x01 \x01(\tb\x06proto3')
 
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, globals())
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'triald.v1.trial_pb2', globals())
 if _descriptor._USE_C_DESCRIPTORS == False:
 
   DESCRIPTOR._options = None
-  _FRAMELOSS._serialized_start=116
-  _FRAMELOSS._serialized_end=160
-  _OUTCOMEREPORT._serialized_start=163
-  _OUTCOMEREPORT._serialized_end=706
-  _OUTCOME._serialized_start=709
-  _OUTCOME._serialized_end=1153
-  _TRIALSPEC._serialized_start=1156
-  _TRIALSPEC._serialized_end=1544
-  _TRIALRECORD._serialized_start=1547
-  _TRIALRECORD._serialized_end=1827
-  _CANCELTRIAL._serialized_start=1829
-  _CANCELTRIAL._serialized_end=1858
+  _FRAMELOSS._serialized_start=149
+  _FRAMELOSS._serialized_end=193
+  _OUTCOMEREPORT._serialized_start=196
+  _OUTCOMEREPORT._serialized_end=739
+  _OUTCOME._serialized_start=742
+  _OUTCOME._serialized_end=1186
+  _TRIALSPEC._serialized_start=1189
+  _TRIALSPEC._serialized_end=1633
+  _TRIALRECORD._serialized_start=1636
+  _TRIALRECORD._serialized_end=1944
+  _CANCELTRIAL._serialized_start=1946
+  _CANCELTRIAL._serialized_end=1975
 # @@protoc_insertion_point(module_scope)
