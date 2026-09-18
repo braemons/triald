@@ -1,16 +1,15 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""triald's copies of the `.tdr` taxonomy against the canonical one.
+"""The `.tdr` taxonomy, and the three places in this repository that restate it.
 
-There are five copies of this table across the family, because five languages
-and contexts need it, and until now *nothing* held them together. §5.2 of the
-contracts repo is what that costs: code 8 was spelled two ways, so one outcome
-was unparseable at the far end and any graph written from the other vocabulary
-was refused at compile — by a person with both spellings in front of them in two
-web UIs.
+`proto/triald/v1/outcomes.proto` is the taxonomy — a protobuf enum, whose value
+names protobuf's JSON mapping puts on the wire and whose numbers are the `.tdr`
+codes. `tools/check_outcomes.py` does the reading; this runs it in the test
+suite so a drift is a red test rather than something CI alone would notice.
 
-**Outcomes cross the wire by name**, so a copy that drifts is not a cosmetic
-problem. This checks triald's two against `tests/contracts/outcomes.json`, which
-is vendored rather than imported: see that directory's README.
+It replaces a vendored `outcomes.json` and a vendored checker
+(`contracts/INTERACTIONS.md` §6). Same protection, one fewer file format: the
+enum says "numbers are never reused" by being an enum, rather than by saying so
+in prose beside a JSON array.
 """
 
 from __future__ import annotations
@@ -18,81 +17,24 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-CONTRACTS = Path(__file__).resolve().parent / "contracts"
-sys.path.insert(0, str(CONTRACTS))
+TOOLS = Path(__file__).resolve().parents[2] / "tools"
+sys.path.insert(0, str(TOOLS))
 
-import check_outcomes as check  # noqa: E402
-
-SOURCE = Path(__file__).resolve().parents[1] / "src" / "triald"
-#: The panels are a sibling of the daemon, not part of its package
-#: (`contracts/DAEMON_LAYOUT.md`), so this test reaches across the repository to
-#: them — which is the point: the outcome table appears in both, and the whole
-#: reason for this file is that the two copies cannot be allowed to drift.
-PANELS = Path(__file__).resolve().parents[2] / "client" / "web" / "elements"
+import check_outcomes  # noqa: E402
 
 
-def taxonomy() -> dict:
-    return check.load_taxonomy(CONTRACTS / "outcomes.json")
-
-
-def test_the_enum_is_the_canonical_table():
-    problems = check.problems(
-        taxonomy(),
-        {"src/triald/outcomes.py": check.python_enum((SOURCE / "outcomes.py").read_text())},
-    )
+def test_every_copy_of_the_taxonomy_agrees_with_the_enum():
+    problems = check_outcomes.problems()
     assert not problems, "\n".join(problems)
 
 
-def test_the_counters_table_has_a_column_for_every_outcome_a_trial_can_carry():
-    # Not UNDETERMINED: nobody assigns it, so the column would always read zero
-    # and invite the question of what it meant.
-    panel = (PANELS / "counters_panel_element.js").read_text()
-    problems = check.countable_problems(
-        taxonomy(),
-        "client/web/elements/counters_panel_element.js OUTCOME_COLUMNS",
-        check.javascript_names(panel, "OUTCOME_COLUMNS"),
-    )
-    assert not problems, "\n".join(problems)
-
-
-def test_there_is_an_accept_flag_for_every_outcome_and_no_others():
-    """`AcceptancePolicy` decides per outcome, so a missing flag is a trial that
-    can never be accepted and an extra one is a setting that does nothing."""
-    from triald.outcomes import AcceptancePolicy, TrialOutcome
-
-    expected = {name.lower() for name in check.canonical_values(taxonomy())}
-    # UNDETERMINED is never reported, so it has no flag; every other one does.
-    expected.discard("undetermined")
-    flags = {
-        field
-        for field in AcceptancePolicy.__dataclass_fields__
-        if field not in {"frame_loss", "imprecise_fixation", "_BY_OUTCOME"}
-    }
-    assert flags == expected
-
-    # And the mapping from outcome to flag reaches all of them.
-    mapped = {AcceptancePolicy._BY_OUTCOME.get(o) for o in TrialOutcome}
-    assert mapped == expected | {None}  # None for UNDETERMINED
-
-
-def test_the_defaults_are_the_ones_the_taxonomy_states():
-    """Which outcomes count towards a round is a decision about the experiment,
-    and it is recorded once, here."""
-    from triald.outcomes import AcceptancePolicy, TrialOutcome
-
-    policy = AcceptancePolicy()
-    for name, accepted in check.accepted_by_default(taxonomy()).items():
-        if name == "UNDETERMINED":
-            continue
-        assert policy.accepts_outcome(TrialOutcome[name]) is accepted, name
-
-
-def test_the_checker_would_notice_a_drift():
-    """The one failure mode of a regex-based checker: a pattern that stops
-    matching finds nothing and passes vacuously. So a deliberate drift must be
-    caught, and an unreadable file must be reported as unreadable."""
-    assert check.problems(taxonomy(), {"nothing": {}})
-    assert check.problems(
-        taxonomy(), {"renamed": {**check.canonical_values(taxonomy()), "HIT": 99}}
-    )
-    assert check.python_enum("class Unrelated:\n    HIT = 1\n") == {}
+def test_the_enum_is_the_tdr_codes():
+    # Spelled out rather than derived: these numbers are in every .tdr the lab
+    # has written, so a test that computed them from the same file it is
+    # checking would agree with any renumbering.
+    taxonomy = check_outcomes.taxonomy()
+    assert taxonomy["UNDETERMINED"] == -1
+    assert taxonomy["NOT_STARTED"] == 0
+    assert taxonomy["HIT"] == 1
+    assert taxonomy["UNEXPECTED_START_SIGNAL"] == 8
+    assert taxonomy["NEVER_FINISHED"] == 11

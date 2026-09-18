@@ -8,7 +8,7 @@
 # it is not.
 
 .PHONY: help sync test lint fmt typecheck check sim clean version \
-        proto check-proto deb wheel packages package-check
+        check-proto deb wheel packages package-check
 
 help:
 	@echo "make sync       install the dev environment"
@@ -17,8 +17,7 @@ help:
 	@echo "make fmt        ruff format"
 	@echo "make typecheck  ty check"
 	@echo "make check      lint + typecheck + test + the proto + a simulated session"
-	@echo "make proto      regenerate what proto/ derives from other files"
-	@echo "make check-proto  the proto compiles, is current, and matches the router"
+	@echo "make check-proto  the proto compiles, and the taxonomy and routes match it"
 	@echo "make sim        run a simulated session"
 	@echo "make version    the version the git tag implies"
 	@echo ""
@@ -45,24 +44,18 @@ typecheck:
 	uv run --directory daemon ty check
 
 # `proto/triald/v1/` is this daemon's public API — types and behaviours both
-# (contracts/DAEMON_LAYOUT.md). Most of it is authored by hand; outcomes.proto
-# is not, because the outcome taxonomy belongs to the family rather than to this
-# daemon and its authored copy is the vendored outcomes.json.
-proto: ## regenerate what proto/ derives from other files
-	python3 tools/generate_outcomes_proto.py
-
-# Three checks, catching three different mistakes: protoc catches a file that
-# does not parse; --check catches a derived file left behind by a change to the
-# taxonomy; and check_routes.py catches a handler decorated into the router with
-# no rpc above it — public API that exists and is written down nowhere.
+# (contracts/DAEMON_LAYOUT.md). All of it is authored by hand, including the
+# outcome taxonomy: it used to be a JSON file with vendored copies and a regex
+# checker, and a protobuf enum is the thing that file was imitating.
 #
-# --check rather than regenerate-then-`git diff`: the git version is vacuous for
-# a file that is not tracked yet, which is exactly when a new generator has
-# earned the least trust.
-check-proto: ## the proto compiles, is current, and matches the router
+# Three checks, catching three different mistakes: protoc catches a file that
+# does not parse; check_outcomes.py catches a copy of the taxonomy that drifted
+# from the enum; and check_routes.py catches a handler decorated into the router
+# with no rpc above it — public API that exists and is written down nowhere.
+check-proto: ## the proto compiles, and the taxonomy and routes match it
 	@protoc --proto_path=proto --descriptor_set_out=/dev/null \
 	  proto/triald/v1/*.proto proto/braemons/v1/route.proto
-	@python3 tools/generate_outcomes_proto.py --check
+	@python3 tools/check_outcomes.py
 	@python3 tools/check_routes.py
 
 # What CI runs. The simulated session is the end-to-end smoke test.

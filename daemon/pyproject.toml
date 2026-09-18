@@ -109,10 +109,6 @@ addopts = "-q --strict-markers"
 [tool.ruff]
 line-length = 96
 src = ["src", "tests"]
-# Vendored byte-for-byte from braemons/contracts, and the point of it is that
-# the copy is identical. A formatter with a different opinion here would rewrite
-# the file and the sync check in that repo would then call it stale for ever.
-extend-exclude = ["tests/contracts"]
 
 [tool.ruff.lint]
 select = [
