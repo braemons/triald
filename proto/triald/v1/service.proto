@@ -1,0 +1,258 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+syntax = "proto3";
+
+package triald.v1;
+
+import "braemons/v1/route.proto";
+import "google/protobuf/empty.proto";
+import "triald/v1/common.proto";
+import "triald/v1/config.proto";
+import "triald/v1/debug.proto";
+import "triald/v1/policy.proto";
+import "triald/v1/session.proto";
+import "triald/v1/sets.proto";
+import "triald/v1/trial.proto";
+
+// What is happening, and who is watching.
+service State {
+  // Everything true right now, in one answer.
+  rpc ReadState(google.protobuf.Empty) returns (SessionState) {
+    option (braemons.v1.route) = { method: "GET", path: "/api/state" };
+  }
+
+  // The same thing, pushed.
+  //
+  // Frames are coalesced under load — `sequence` skips, and that is not loss:
+  // each frame is a whole state, so the newest one is always the truth. A
+  // client that missed three frames has missed nothing it could have used.
+  rpc WatchState(google.protobuf.Empty) returns (stream StreamFrame) {
+    option (braemons.v1.route) = {
+      method: "GET",
+      path: "/api/stream",
+      websocket: true
+    };
+  }
+}
+
+// Starting and stopping, and what gets written to disk.
+//
+// **Arming and recording are two switches, deliberately.** A session can run
+// without recording — that is what a warm-up is — and recording can be paused
+// mid-session without losing where the round had got to.
+service Session {
+  // Build a session from the config and the active set, and refuse if the
+  // switch rules reachable from that set do not hang together.
+  rpc Arm(google.protobuf.Empty) returns (SessionState) {
+    option (braemons.v1.route) = { method: "POST", path: "/api/session/arm" };
+  }
+
+  // End the session. The reason is recorded and shown.
+  rpc Stop(StopRequest) returns (SessionState) {
+    option (braemons.v1.route) = { method: "POST", path: "/api/session/stop" };
+  }
+
+  rpc StartRecording(google.protobuf.Empty) returns (SessionState) {
+    option (braemons.v1.route) = { method: "POST", path: "/api/session/recording/start" };
+  }
+
+  // Stop writing, keeping the session. A trial already in flight finishes
+  // recording: `recording` is latched on the trial at selection.
+  rpc PauseRecording(google.protobuf.Empty) returns (SessionState) {
+    option (braemons.v1.route) = { method: "POST", path: "/api/session/recording/pause" };
+  }
+
+  rpc ResumeRecording(google.protobuf.Empty) returns (SessionState) {
+    option (braemons.v1.route) = { method: "POST", path: "/api/session/recording/resume" };
+  }
+
+  rpc StopRecording(google.protobuf.Empty) returns (SessionState) {
+    option (braemons.v1.route) = { method: "POST", path: "/api/session/recording/stop" };
+  }
+}
+
+// One trial, from selection to outcome.
+//
+// **This is the loop.** Whatever runs a trial asks for the next one, runs it,
+// and reports what happened; this daemon decides and records. It commands its
+// participants and subscribes to what they publish, and they command nobody —
+// `contracts/INTERACTIONS.md` §2.
+service Trial {
+  // Select the next trial and publish it. The selection is latched: asking
+  // twice without reporting an outcome is an error, not a redraw.
+  rpc Next(google.protobuf.Empty) returns (TrialSpec) {
+    option (braemons.v1.route) = { method: "POST", path: "/api/trial/next" };
+  }
+
+  // Report how a trial ended, and get back the record it became.
+  //
+  // Refuses 409 when `trial_id` is not the trial in flight — a report that
+  // arrived late or twice must never be attributed to the trial after the one
+  // it belongs to. The record says whether the trial was *accepted*, which is
+  // not the same as counted, and names which check refused it.
+  rpc ReportOutcome(OutcomeReport) returns (TrialRecord) {
+    option (braemons.v1.route) = {
+      method: "POST",
+      path: "/api/trial/outcome",
+      body: "*"
+    };
+  }
+
+  // Abandon the trial in flight. It is recorded as `CANCELLED` rather than
+  // discarded: a trial that happened to an animal happened.
+  rpc Cancel(CancelTrial) returns (TrialRecord) {
+    option (braemons.v1.route) = {
+      method: "POST",
+      path: "/api/trial/cancel",
+      body: "*"
+    };
+  }
+}
+
+// The trial types, in named sets.
+service SetStore {
+  rpc ReadSets(google.protobuf.Empty) returns (Sets) {
+    option (braemons.v1.route) = { method: "GET", path: "/api/sets" };
+  }
+
+  rpc WriteSet(WriteSetRequest) returns (Sets) {
+    option (braemons.v1.route) = {
+      method: "PUT",
+      path: "/api/sets/{name}",
+      body: "set"
+    };
+  }
+
+  rpc DeleteSet(SetName) returns (Sets) {
+    option (braemons.v1.route) = { method: "DELETE", path: "/api/sets/{name}" };
+  }
+
+  // Make a set active. Refused while a session is armed: the bag was built
+  // from the set that was active when it was.
+  rpc LoadSet(SetName) returns (SessionState) {
+    option (braemons.v1.route) = { method: "POST", path: "/api/sets/{name}/load" };
+  }
+}
+
+// The session's declarative settings.
+service Config {
+  rpc ReadConfig(google.protobuf.Empty) returns (SessionConfig) {
+    option (braemons.v1.route) = { method: "GET", path: "/api/config" };
+  }
+
+  // Change some of it. What may change while a session runs is the daemon's
+  // decision, and the answer says what actually changed and whether the round
+  // restarted because the bag had to be rebuilt.
+  rpc PatchConfig(ConfigPatch) returns (ConfigUpdateResult) {
+    option (braemons.v1.route) = {
+      method: "PATCH",
+      path: "/api/config",
+      body: "*"
+    };
+  }
+
+  // Start the round count again without touching the counters.
+  rpc ResetRounds(google.protobuf.Empty) returns (SessionState) {
+    option (braemons.v1.route) = { method: "POST", path: "/api/config/reset-rounds" };
+  }
+
+  // Zero the tallies without touching the round.
+  rpc ResetCounters(google.protobuf.Empty) returns (SessionState) {
+    option (braemons.v1.route) = { method: "POST", path: "/api/config/reset-counters" };
+  }
+}
+
+// The Python that decides what happens next, when the declarative settings are
+// not enough.
+service Policy {
+  // `source` is a query parameter: the text is large and usually not wanted.
+  rpc ReadPolicy(ReadPolicyRequest) returns (PolicyInfo) {
+    option (braemons.v1.route) = { method: "GET", path: "/api/policy" };
+  }
+
+  // Compile it, import it, and run it over a short simulated session — without
+  // loading it. A policy that raises on trial 200 is worth finding out about
+  // before there is an animal in the rig.
+  rpc CheckPolicy(PolicySource) returns (PolicyCheckResult) {
+    option (braemons.v1.route) = {
+      method: "POST",
+      path: "/api/policy/check",
+      body: "*"
+    };
+  }
+
+  rpc LoadPolicy(PolicySource) returns (PolicyInfo) {
+    option (braemons.v1.route) = {
+      method: "PUT",
+      path: "/api/policy",
+      body: "*"
+    };
+  }
+
+  // Go back to the declarative ordering.
+  rpc ClearPolicy(google.protobuf.Empty) returns (PolicyInfo) {
+    option (braemons.v1.route) = { method: "DELETE", path: "/api/policy" };
+  }
+}
+
+// Things that happened that nothing else records.
+service Events {
+  // Append an experimenter's note to the session's event stream.
+  rpc Note(NoteRequest) returns (Ok) {
+    option (braemons.v1.route) = {
+      method: "POST",
+      path: "/api/events/note",
+      body: "*"
+    };
+  }
+}
+
+// A synthetic subject, so a policy can be run over 500 trials in a second.
+//
+// **Not a model of behaviour and not meant to be.** It exists so that logic can
+// be checked before anything is connected to a rig, and so this UI can be
+// driven with no hardware at all.
+service Debug {
+  rpc ReadSim(google.protobuf.Empty) returns (SimSettings) {
+    option (braemons.v1.route) = { method: "GET", path: "/api/debug/sim" };
+  }
+
+  rpc WriteSim(SimSettings) returns (SimSettings) {
+    option (braemons.v1.route) = {
+      method: "PUT",
+      path: "/api/debug/sim",
+      body: "*"
+    };
+  }
+
+  // Run whole simulated trials, now.
+  rpc Step(StepRequest) returns (StepResult) {
+    option (braemons.v1.route) = {
+      method: "POST",
+      path: "/api/debug/step",
+      body: "*"
+    };
+  }
+
+  rpc ReadFreeRun(google.protobuf.Empty) returns (FreeRunStatus) {
+    option (braemons.v1.route) = { method: "GET", path: "/api/debug/free-run" };
+  }
+
+  // Step the simulator on a timer until it is stopped or the session ends.
+  rpc WriteFreeRun(FreeRun) returns (FreeRunStatus) {
+    option (braemons.v1.route) = {
+      method: "PUT",
+      path: "/api/debug/free-run",
+      body: "*"
+    };
+  }
+}
+
+// Why the session is being stopped. A query parameter today.
+message StopRequest {
+  string reason = 1;
+}
+
+// Whether to include the policy's source text in the answer.
+message ReadPolicyRequest {
+  bool source = 1;
+}

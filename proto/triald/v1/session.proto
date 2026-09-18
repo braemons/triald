@@ -1,0 +1,131 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+syntax = "proto3";
+
+package triald.v1;
+
+import "triald/v1/common.proto";
+import "triald/v1/config.proto";
+import "triald/v1/policy.proto";
+import "triald/v1/trial.proto";
+
+// Tallies for one trial type, or for the whole session.
+//
+// `total` counts every reported outcome; `accepted` counts the ones that
+// consumed a slot in the round. The gap between the two is the number an
+// experimenter watching a stalled session actually wants.
+message ResultCount {
+  int32 total = 1;
+  int32 accepted = 2;
+  int32 remaining = 3;
+  int32 frame_loss = 4 [json_name = "frame_loss"];
+
+  // Keyed by outcome name — `HIT`, `EYE_ERROR` — which is the same spelling
+  // `TrialOutcome` puts on the wire and the same one `outcomes.json` holds.
+  map<string, int32> by_outcome = 5 [json_name = "by_outcome"];
+
+  int32 hits = 6;
+  optional double hit_rate = 7 [json_name = "hit_rate"];
+}
+
+// One row of the counters table: a trial type and its tallies.
+//
+// The trial type definition joined to its counters here, so a UI does not have
+// to match the two up itself. Flattened rather than nesting a `ResultCount`,
+// because the record it replaces was flat and a table row is what this is.
+message CounterRow {
+  int32 total = 1;
+  int32 accepted = 2;
+  int32 remaining = 3;
+  int32 frame_loss = 4 [json_name = "frame_loss"];
+  map<string, int32> by_outcome = 5 [json_name = "by_outcome"];
+  int32 hits = 6;
+  optional double hit_rate = 7 [json_name = "hit_rate"];
+
+  // Position in the active set.
+  int32 index = 8;
+
+  // Extended by the set number when that is on.
+  int32 trial_type_number = 9 [json_name = "trial_type_number"];
+
+  string name = 10;
+  int32 trials_per_round = 11 [json_name = "trials_per_round"];
+  string statemachine_graph = 12 [json_name = "statemachine_graph"];
+  int32 reward_ms = 13 [json_name = "reward_ms"];
+
+  // Chance this type is drawn next by the declarative ordering. Advisory: a
+  // policy that selects for itself is not consulted here.
+  double p_next = 14 [json_name = "p_next"];
+}
+
+// How far the active set has got towards its switch rule.
+message SetProgress {
+  string set_name = 1 [json_name = "set_name"];
+  int32 accepted_trials = 2 [json_name = "accepted_trials"];
+  int32 hits = 3;
+  int32 all_trials = 4 [json_name = "all_trials"];
+  optional TrialCountCriterion criterion = 5;
+  optional int32 target = 6;
+  optional string switch_to = 7 [json_name = "switch_to"];
+  int32 reached = 8;
+  optional double fraction = 9;
+}
+
+// Everything the UI, a client or a policy can see.
+//
+// The payload of `ReadState` and of every frame on the stream, so there is one
+// description of what is happening rather than two that drift.
+message SessionState {
+  bool running = 1;
+
+  // A session object exists; it may since have stopped.
+  bool armed = 2;
+
+  bool recording = 3;
+  bool paused = 4;
+  optional string stop_reason = 5 [json_name = "stop_reason"];
+
+  // The trial in flight, or absent.
+  optional TrialSpec current = 6;
+  optional TrialRecord last = 7;
+
+  string set_name = 8 [json_name = "set_name"];
+  SetProgress set_progress = 9 [json_name = "set_progress"];
+  int32 rounds_completed = 10 [json_name = "rounds_completed"];
+  int32 rounds_configured = 11 [json_name = "rounds_configured"];
+  int32 trials_per_round = 12 [json_name = "trials_per_round"];
+  int32 trials_remaining = 13 [json_name = "trials_remaining"];
+
+  ResultCount totals = 14;
+  repeated CounterRow counters = 15;
+
+  int64 trials_started = 16 [json_name = "trials_started"];
+  int64 seed = 17;
+  SessionConfig config = 18;
+  PolicyInfo policy = 19;
+  repeated PolicyError policy_errors = 20 [json_name = "policy_errors"];
+
+  // The last few finished trials, oldest first.
+  repeated TrialRecord recent = 21;
+}
+
+// One frame of the session stream.
+//
+// A `oneof` rather than a `kind` discriminator beside flattened fields: today
+// there is one arm, and the whole reason the envelope exists is that a later
+// message — a log line, a chart point — can be added without every client
+// having to learn a second one. A `oneof` is how protobuf says that.
+message StreamFrame {
+  // Monotonic; a gap means frames were coalesced.
+  int64 sequence = 1;
+
+  string at = 2;
+
+  oneof frame {
+    SessionState state = 3;
+  }
+}
+
+// An experimenter's note, appended to the event stream.
+message NoteRequest {
+  string text = 1;
+}

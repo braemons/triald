@@ -1,0 +1,50 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+syntax = "proto3";
+
+package braemons.v1;
+
+import "google/protobuf/descriptor.proto";
+
+// Where an rpc actually rides.
+//
+// **This family authors its interfaces in protobuf and does not run gRPC.**
+// `contracts/INTERACTIONS.md` §7 settles that: the IDL is what earns its keep,
+// and the RPC framework is what takes away `curl` and MATLAB's `webread`. So
+// every rpc below names the HTTP route it is reached at, and that route is the
+// only way to call it.
+//
+// This is deliberately *not* `google.api.http`. That option exists to feed
+// grpc-gateway and the googleapis OpenAPI generators, neither of which this
+// family uses, and vendoring two files of somebody else's schema to borrow
+// their recognition would be paying for a tool we decided against. Ours says
+// exactly what we mean and is twenty lines.
+//
+// The file is identical in every braemons repository and vendored from
+// `contracts/`, the way `outcomes.json` is.
+extend google.protobuf.MethodOptions {
+  // 50000–99999 is the range protobuf reserves for extensions that never
+  // leave an organisation, which is precisely this one's situation.
+  Route route = 50001;
+}
+
+message Route {
+  // `GET`, `POST`, `PUT`, `PATCH`, `DELETE`. For a websocket it is the method
+  // of the upgrade request, which is always `GET`.
+  string method = 1;
+
+  // `/api/zones/arm`, with `{name}` for a path parameter — the spelling axum
+  // and every other router in the family already uses.
+  string path = 2;
+
+  // Which part of the request message is the body: `*` for the whole message,
+  // a field name for one field, empty for a request that has no body and
+  // carries its fields in the path or the query string.
+  string body = 3;
+
+  // The route is a websocket the server pushes frames down. The rpc is then
+  // `returns (stream T)`, and the client opens a socket rather than calling.
+  //
+  // This is the one thing OpenAPI could not say, which is why three of this
+  // family's four streams were specified only in prose until now.
+  bool websocket = 4;
+}

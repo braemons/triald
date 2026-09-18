@@ -1,0 +1,94 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+syntax = "proto3";
+
+package triald.v1;
+
+import "triald/v1/common.proto";
+
+// Which outcomes consume a slot in the round.
+//
+// The per-outcome flags plus the two that cut across every outcome. Any of the
+// three checks can veto on its own.
+//
+// Every flag is `optional` because this message is also a patch: absent means
+// "leave it alone", and proto3 cannot tell an absent `bool` from `false`
+// without it. The defaults a fresh config starts from are in the comments, and
+// the convert seam applies them.
+message Acceptance {
+  optional bool not_started = 1 [json_name = "not_started"];            // default false
+  optional bool hit = 2;                                                // default true
+  optional bool wrong_response = 3 [json_name = "wrong_response"];      // default true
+  optional bool early_hit = 4 [json_name = "early_hit"];                // default true
+  optional bool early_wrong_response = 5 [json_name = "early_wrong_response"]; // default true
+  optional bool early = 6;                                              // default true
+  optional bool late = 7;                                               // default true
+  optional bool eye_error = 8 [json_name = "eye_error"];                // default true
+  optional bool unexpected_start_signal = 9 [json_name = "unexpected_start_signal"]; // default false
+  optional bool wrong_start_signal = 10 [json_name = "wrong_start_signal"];          // default false
+  optional bool cancelled = 11;                                         // default false
+  optional bool never_finished = 12 [json_name = "never_finished"];     // default false
+
+  // These two cut across every outcome: a trial that lost a frame, or whose
+  // fixation was imprecise, can be refused whatever it otherwise was.
+  optional bool frame_loss = 13 [json_name = "frame_loss"];             // default true
+  optional bool imprecise_fixation = 14 [json_name = "imprecise_fixation"]; // default true
+}
+
+// One experiment's declarative settings — everything the console can edit
+// without anybody writing Python.
+message SessionConfig {
+  string initial_set = 1 [json_name = "initial_set"];
+
+  // Omitted means `RANDOM_IN_ROUND`.
+  Ordering ordering = 2;
+
+  int32 rounds = 3;
+  bool avoid_repeat = 4 [json_name = "avoid_repeat"];
+  Acceptance acceptance = 5;
+
+  // How long a trial may take before triald gives up on hearing about it and
+  // records `NEVER_FINISHED`. A watchdog, not a paradigm parameter: set it to
+  // the longest a trial could honestly take. Zero means no deadline.
+  int32 trial_cap_ms = 6 [json_name = "trial_cap_ms"];
+
+  bool stop_when_rounds_done = 7 [json_name = "stop_when_rounds_done"];
+
+  // Absent means no limit. Distinct from zero, which a patch uses to *clear* it.
+  optional int32 stop_after_trials = 8 [json_name = "stop_after_trials"];
+
+  // Omitted means `ACCEPTED_TRIALS`.
+  TrialCountCriterion stop_criterion = 9 [json_name = "stop_criterion"];
+
+  bool extend_trial_type_number = 10 [json_name = "extend_trial_type_number"];
+  optional int64 seed = 11;
+}
+
+// A partial config update: send only the fields you are changing.
+//
+// Every field is optional and absent means "leave it alone" — except
+// `stop_after_trials`, where absence is itself a value on the config it patches,
+// so it is cleared by sending `0`.
+message ConfigPatch {
+  optional Ordering ordering = 1;
+  optional int32 rounds = 2;
+  optional bool avoid_repeat = 3 [json_name = "avoid_repeat"];
+  optional Acceptance acceptance = 4;
+  optional int32 trial_cap_ms = 5 [json_name = "trial_cap_ms"];
+  optional bool stop_when_rounds_done = 6 [json_name = "stop_when_rounds_done"];
+  optional int32 stop_after_trials = 7 [json_name = "stop_after_trials"];
+  optional TrialCountCriterion stop_criterion = 8 [json_name = "stop_criterion"];
+  optional string initial_set = 9 [json_name = "initial_set"];
+  optional bool extend_trial_type_number = 10 [json_name = "extend_trial_type_number"];
+  optional int64 seed = 11;
+}
+
+// What a config change actually did.
+message ConfigUpdateResult {
+  // Fields whose value is now different.
+  repeated string changed = 1;
+
+  // Whether the round restarted because the bag had to be rebuilt.
+  bool bag_rebuilt = 2 [json_name = "bag_rebuilt"];
+
+  SessionConfig config = 3;
+}

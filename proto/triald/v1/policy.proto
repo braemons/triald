@@ -1,0 +1,73 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+syntax = "proto3";
+
+package triald.v1;
+
+import "google/protobuf/struct.proto";
+
+// The policy the session is running.
+message PolicyInfo {
+  string name = 1;
+  string class_name = 2 [json_name = "class_name"];
+
+  // Taken over the source text, and what the session manifest records: "which
+  // version of the staircase ran on Tuesday" has to be answerable from the
+  // session directory alone, and a filename cannot answer it because the file
+  // changes.
+  optional string sha256 = 3;
+
+  PolicyOrigin origin = 4;
+  optional string source = 5;
+
+  // Whatever the policy's `snapshot()` last returned. Arbitrary: a policy is
+  // somebody's Python and the daemon never reads inside it.
+  optional google.protobuf.Struct state = 6;
+}
+
+enum PolicyOrigin {
+  POLICY_ORIGIN_UNSPECIFIED = 0;
+  POLICY_ORIGIN_DEFAULT = 1;
+  POLICY_ORIGIN_FILE = 2;
+  POLICY_ORIGIN_UPLOADED = 3;
+}
+
+// Source text to check or load. Never a path: the daemon runs as its own user
+// and a path would be read on the rig box rather than on the machine that meant
+// it.
+message PolicySource {
+  string name = 1;
+  string source = 2;
+}
+
+// One problem found in a policy.
+//
+// Line numbers so an editor can mark the offending line rather than printing a
+// traceback underneath it.
+message PolicyDiagnostic {
+  optional int32 line = 1;
+  optional int32 column = 2;
+  string message = 3;
+}
+
+// What `CheckPolicy` found.
+message PolicyCheckResult {
+  bool ok = 1;
+  optional string class_name = 2 [json_name = "class_name"];
+  string sha256 = 3;
+  repeated PolicyDiagnostic diagnostics = 4;
+
+  // Trials of the smoke run that completed.
+  int32 trials_run = 5 [json_name = "trials_run"];
+}
+
+// A policy hook that raised.
+//
+// Recorded rather than fatal: there is an animal in the rig, and a stopped
+// experiment is worse than a fallback trial.
+message PolicyError {
+  string hook = 1;
+  int64 trial_number = 2 [json_name = "trial_number"];
+  string error = 3;
+  string traceback = 4;
+  string at = 5;
+}

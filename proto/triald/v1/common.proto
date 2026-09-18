@@ -1,0 +1,70 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+syntax = "proto3";
+
+package triald.v1;
+
+// Why a call was refused.
+//
+// `detail` is meant to be shown to a person: it says what was wrong and, where
+// there is one, what to do instead. The HTTP status carries the category and
+// `error` names the particular case within it.
+message Error {
+  // A short machine-readable kind, e.g. `session`.
+  string error = 1;
+  string detail = 2;
+}
+
+// Nothing to say beyond that it worked.
+message Ok {
+  bool ok = 1;
+}
+
+// What the animal pressed, pulled or held.
+//
+// A `.tdr` code like the outcome, and like the outcome its value names carry no
+// prefix: they are a wire contract older than this daemon.
+enum Manipulandum {
+  NONE = 0;
+  LEVER = 1;
+  TOUCH_BAR = 2;
+  BUTTON = 3;
+  JOYSTICK = 4;
+  GAMEPAD = 5;
+  SERIAL = 6;
+  SIMULATED = 7;
+}
+
+// A way of counting trials, shared by the switch rule and the stop rule.
+//
+// One enum rather than two because the question is the same one — *how many
+// trials of what kind* — and two would drift.
+//
+// `UNSPECIFIED` means the field was omitted, and what that then means depends
+// on where it was omitted: a switch rule counts `HITS`, a stop rule counts
+// `ACCEPTED_TRIALS`. Each field below says which, because a shared enum cannot.
+enum TrialCountCriterion {
+  TRIAL_COUNT_CRITERION_UNSPECIFIED = 0;
+  TRIAL_COUNT_CRITERION_ACCEPTED_TRIALS = 1;
+  TRIAL_COUNT_CRITERION_HITS = 2;
+  TRIAL_COUNT_CRITERION_ALL_TRIALS = 3;
+}
+
+// How the next trial type is drawn from the bag.
+enum Ordering {
+  // Omitted. Treated as `RANDOM_IN_ROUND`.
+  ORDERING_UNSPECIFIED = 0;
+
+  // Random within a round: the bag holds one round and refills each round, so
+  // every round contains exactly the configured weights. What a balanced block
+  // wants, and the default.
+  ORDERING_RANDOM_IN_ROUND = 1;
+
+  // Random across the whole experiment rather than within a round.
+  ORDERING_RANDOM_IN_EXPERIMENT = 2;
+
+  ORDERING_ASCENDING = 3;
+  ORDERING_DESCENDING = 4;
+
+  // Drawn independently every trial, so the weights hold only in expectation.
+  ORDERING_RANDOM_WITH_REPLACEMENT = 5;
+}

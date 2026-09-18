@@ -1,0 +1,78 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+syntax = "proto3";
+
+package triald.v1;
+
+import "google/protobuf/struct.proto";
+import "triald/v1/common.proto";
+
+// When to leave a set, and for which one.
+message SwitchRule {
+  bool enabled = 1;
+
+  // What the count below counts. Omitted means `HITS`.
+  TrialCountCriterion criterion = 2;
+
+  // Trials of `criterion` before leaving.
+  int32 count = 3;
+
+  // Name of the set to go to.
+  optional string target = 4;
+}
+
+// One condition.
+message TrialType {
+  string name = 1;
+
+  // Weight; zero means unused.
+  int32 trials_per_round = 2 [json_name = "trials_per_round"];
+
+  // Name of the state graph this type runs; empty means whatever the executor
+  // already has loaded. A name, never an index.
+  string statemachine_graph = 3 [json_name = "statemachine_graph"];
+
+  int32 reward_ms = 4 [json_name = "reward_ms"];
+
+  // Paradigm values, stored and returned verbatim; never interpreted. Arbitrary
+  // because this daemon has no opinion about what a paradigm needs.
+  google.protobuf.Struct params = 5;
+}
+
+// A named collection of trial types plus its switch rule.
+//
+// The last four fields are computed on the way out and ignored on the way in.
+message TrialTypeSet {
+  string name = 1;
+  repeated TrialType trial_types = 2 [json_name = "trial_types"];
+  SwitchRule switch_rule = 3 [json_name = "switch_rule"];
+
+  int32 trials_per_round = 4 [json_name = "trials_per_round"];
+  bool runnable = 5;
+
+  // 1-based position in the store; 0 if absent.
+  int32 set_number = 6 [json_name = "set_number"];
+  bool active = 7;
+}
+
+// Every set in the store, and whether the switch chain hangs together.
+message Sets {
+  repeated TrialTypeSet sets = 1;
+  optional string active = 2;
+
+  // Why the switch rules reachable from the active set cannot be followed, or
+  // absent when they can. The same check `Arm` refuses on, run continuously so
+  // the UI can show it before anybody starts.
+  optional string chain_problem = 3 [json_name = "chain_problem"];
+}
+
+// A set's name in the store. A path parameter, never a body.
+message SetName {
+  string name = 1;
+}
+
+// Named for the request rather than the rpc: an rpc and a message may not
+// share a name, and the rpc is the one whose name a reader is looking for.
+message WriteSetRequest {
+  string name = 1;
+  TrialTypeSet set = 2;
+}

@@ -1,0 +1,45 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+syntax = "proto3";
+
+package triald.v1;
+
+import "triald/v1/session.proto";
+
+// The synthetic subject behind the debug controls.
+message SimSettings {
+  double hit_rate = 1 [json_name = "hit_rate"];
+  double not_started_rate = 2 [json_name = "not_started_rate"];
+  double eye_error_rate = 3 [json_name = "eye_error_rate"];
+  double early_rate = 4 [json_name = "early_rate"];
+  double frame_loss_rate = 5 [json_name = "frame_loss_rate"];
+  double imprecise_fixation_rate = 6 [json_name = "imprecise_fixation_rate"];
+
+  // A different hit rate for named trial types, so a staircase has something to
+  // climb.
+  map<string, double> hit_rate_by_type = 7 [json_name = "hit_rate_by_type"];
+}
+
+// Run whole simulated trials.
+message StepRequest {
+  int32 trials = 1;
+}
+
+// What a debug step produced.
+message StepResult {
+  int32 trials = 1;
+  bool stopped = 2;
+  optional string stop_reason = 3 [json_name = "stop_reason"];
+  SessionState state = 4;
+}
+
+// Start or stop the free-running simulator.
+message FreeRun {
+  bool running = 1;
+  int32 interval_ms = 2 [json_name = "interval_ms"];
+}
+
+// Whether the simulator is free-running, and how fast.
+message FreeRunStatus {
+  bool running = 1;
+  int32 interval_ms = 2 [json_name = "interval_ms"];
+}
