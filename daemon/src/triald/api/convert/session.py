@@ -5,12 +5,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from triald._proto.triald.v1 import (
+    session_pb2,
+)
 from triald.counters import ResultCount
 from triald.state import SessionState, SetProgress
 from triald.trialtypes import TrialTypeSet
-from triald.v1 import (  # ty: ignore[unresolved-import]  (resolved at runtime by __init__'s __path__)
-    session_pb2,
-)
 
 from .config import _CRITERIA_TO_WIRE, session_config_to_wire
 from .policy import policy_error_to_wire, policy_info_to_wire

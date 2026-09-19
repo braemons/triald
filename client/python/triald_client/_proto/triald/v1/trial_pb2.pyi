@@ -3,7 +3,7 @@ import datetime
 from google.protobuf import struct_pb2 as _struct_pb2
 from google.protobuf import timestamp_pb2 as _timestamp_pb2
 from triald_client._proto.triald.v1 import common_pb2 as _common_pb2
-from triald_client._proto.triald.v1 import outcomes_pb2 as _outcomes_pb2
+from triald_client._proto.braemons.v1 import trial_outcome_pb2 as _trial_outcome_pb2
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
 from collections.abc import Mapping as _Mapping
@@ -33,7 +33,7 @@ class OutcomeReport(_message.Message):
     SIMULATED_FIELD_NUMBER: _ClassVar[int]
     NOTE_FIELD_NUMBER: _ClassVar[int]
     trial_id: int
-    outcome: _outcomes_pb2.TrialOutcome
+    outcome: _trial_outcome_pb2.TrialOutcome
     manipulandum: _common_pb2.Manipulandum
     reaction_time_ms: float
     terminating_interval: int
@@ -43,7 +43,7 @@ class OutcomeReport(_message.Message):
     hit_condition: bool
     simulated: bool
     note: str
-    def __init__(self, trial_id: _Optional[int] = ..., outcome: _Optional[_Union[_outcomes_pb2.TrialOutcome, str]] = ..., manipulandum: _Optional[_Union[_common_pb2.Manipulandum, str]] = ..., reaction_time_ms: _Optional[float] = ..., terminating_interval: _Optional[int] = ..., precise_fixation: _Optional[bool] = ..., frame_loss: _Optional[_Union[FrameLoss, _Mapping]] = ..., reward_ms: _Optional[int] = ..., hit_condition: _Optional[bool] = ..., simulated: _Optional[bool] = ..., note: _Optional[str] = ...) -> None: ...
+    def __init__(self, trial_id: _Optional[int] = ..., outcome: _Optional[_Union[_trial_outcome_pb2.TrialOutcome, str]] = ..., manipulandum: _Optional[_Union[_common_pb2.Manipulandum, str]] = ..., reaction_time_ms: _Optional[float] = ..., terminating_interval: _Optional[int] = ..., precise_fixation: _Optional[bool] = ..., frame_loss: _Optional[_Union[FrameLoss, _Mapping]] = ..., reward_ms: _Optional[int] = ..., hit_condition: _Optional[bool] = ..., simulated: _Optional[bool] = ..., note: _Optional[str] = ...) -> None: ...
 
 class Outcome(_message.Message):
     __slots__ = ("code", "name", "manipulandum", "reaction_time_ms", "terminating_interval", "precise_fixation", "frame_loss", "reward_ms", "hit_condition", "simulated", "note")

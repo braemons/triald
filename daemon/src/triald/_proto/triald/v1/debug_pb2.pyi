@@ -1,4 +1,4 @@
-from triald.v1 import session_pb2 as _session_pb2
+from triald._proto.triald.v1 import session_pb2 as _session_pb2
 from google.protobuf.internal import containers as _containers
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message

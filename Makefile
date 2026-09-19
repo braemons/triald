@@ -75,17 +75,36 @@ proto: ## regenerate daemon/src/triald/_proto/ from proto/
 # the servicer base classes it produces are what `api/servicers/` implements —
 # and an rpc with no implementation is caught by the generated stub rather than
 # by a checker reading source code with regexes.
+# **The import rewrite is why this is a target and not a command.**
+#
+# protoc roots a generated module's imports at the proto path, so the stubs
+# reach each other as `from triald.v1 import common_pb2` — and `triald` is this
+# package, so that only resolves through a `__path__` trick no static checker
+# can follow. It also cannot work at all for `from braemons.v1 import ...`,
+# which has no package here to hang off.
+#
+# So the generated imports are rewritten to be absolute inside `_proto/`. It is
+# one sed over three file kinds, `check-proto` compares the rewritten output so
+# nothing drifts back, and `client/python/Makefile` does the same thing for the
+# same reason.
 generate-into:
 	@mkdir -p $(OUT)
 	@uv run --directory daemon --group dev python -m grpc_tools.protoc \
 	  --proto_path=../proto \
 	  --python_out=../$(OUT) --pyi_out=../$(OUT) --grpc_python_out=../$(OUT) \
 	  $(patsubst proto/%,../proto/%,$(PROTOS))
+	@find $(OUT) -name '*.py' -o -name '*.pyi' | xargs sed -i \
+	  -e 's/^from triald\.v1 import /from triald._proto.triald.v1 import /' \
+	  -e 's/^from braemons\.v1 import /from triald._proto.braemons.v1 import /'
 
-PROTOS := $(wildcard proto/triald/v1/*.proto)
+# Both packages: `triald/v1/` is this daemon's interface, and `braemons/v1/`
+# holds what the family agrees on — today the `.tdr` outcome taxonomy, which
+# statemachined speaks too and neither daemon owns.
+PROTOS := $(wildcard proto/triald/v1/*.proto) $(wildcard proto/braemons/v1/*.proto)
 
 check-proto: ## the proto compiles, is current, and matches the taxonomy
-	@protoc --proto_path=proto --descriptor_set_out=/dev/null proto/triald/v1/*.proto
+	@protoc --proto_path=proto --descriptor_set_out=/dev/null \
+	  proto/triald/v1/*.proto proto/braemons/v1/*.proto
 	@# Into a scratch directory and compared, rather than regenerated in place
 	@# and handed to `git diff`: the git version is vacuous for a file git does
 	@# not track yet, which is exactly when a new generator is least trusted.

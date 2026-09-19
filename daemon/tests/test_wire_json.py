@@ -23,7 +23,8 @@ pytest.importorskip("google.protobuf", reason="the wire types need the serve ext
 # file rather than failing to collect it. ruff wants one import block at the
 # top and cannot be given one here.
 from triald.api import wire  # noqa: I001
-from triald.v1 import config_pb2, outcomes_pb2, session_pb2, trial_pb2
+from triald._proto.braemons.v1 import trial_outcome_pb2
+from triald._proto.triald.v1 import config_pb2, session_pb2, trial_pb2
 
 
 def as_dict(message) -> dict:
@@ -55,7 +56,7 @@ def test_an_absent_optional_field_is_still_absent():
 def test_a_units_name_survives_the_mapping():
     # Without `json_name` in the .proto every one of these would be camelCase.
     report = trial_pb2.OutcomeReport(
-        trial_id=7, outcome=outcomes_pb2.HIT, reaction_time_ms=250.5, reward_ms=120
+        trial_id=7, outcome=trial_outcome_pb2.HIT, reaction_time_ms=250.5, reward_ms=120
     )
     written = as_dict(report)
     for field in ("trial_id", "reaction_time_ms", "reward_ms"):
@@ -66,7 +67,7 @@ def test_a_64_bit_integer_is_a_string():
     # JSON numbers are doubles, so the mapping quotes anything 64-bit. Every
     # consumer of a trial id or a trial number has to parse it; this is the
     # fact they have to know, asserted rather than remembered.
-    report = trial_pb2.OutcomeReport(trial_id=41822, outcome=outcomes_pb2.HIT)
+    report = trial_pb2.OutcomeReport(trial_id=41822, outcome=trial_outcome_pb2.HIT)
     assert as_dict(report)["trial_id"] == "41822"
 
 
@@ -74,7 +75,9 @@ def test_an_outcome_is_its_name_with_no_prefix():
     # The whole argument for spelling the enum's values `HIT` rather than
     # `TRIAL_OUTCOME_HIT`: this is what goes on the wire, and it is what every
     # .tdr file and every analysis script says.
-    report = trial_pb2.OutcomeReport(trial_id=1, outcome=outcomes_pb2.UNEXPECTED_START_SIGNAL)
+    report = trial_pb2.OutcomeReport(
+        trial_id=1, outcome=trial_outcome_pb2.UNEXPECTED_START_SIGNAL
+    )
     assert as_dict(report)["outcome"] == "UNEXPECTED_START_SIGNAL"
 
     undetermined = trial_pb2.Outcome(code=-1, name="UNDETERMINED", manipulandum="NONE")
@@ -87,7 +90,7 @@ def test_an_outcome_can_be_sent_by_name_or_by_number():
     # survives the move without a validator.
     by_name = wire.from_json('{"trial_id": "3", "outcome": "HIT"}', trial_pb2.OutcomeReport)
     by_number = wire.from_json('{"trial_id": "3", "outcome": 1}', trial_pb2.OutcomeReport)
-    assert by_name.outcome == by_number.outcome == outcomes_pb2.HIT
+    assert by_name.outcome == by_number.outcome == trial_outcome_pb2.HIT
 
 
 def test_a_stream_frame_names_its_arm():

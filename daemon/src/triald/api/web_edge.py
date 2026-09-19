@@ -41,11 +41,11 @@ from google.protobuf import json_format
 from google.protobuf.message import Message
 from google.protobuf.message_factory import GetMessageClass
 
-from triald.api.service import SessionService
-from triald.api.servicers.refusals import REFUSAL_METADATA_KEY
-from triald.v1 import (  # ty: ignore[unresolved-import]  (resolved at runtime by __init__'s __path__)
+from triald._proto.triald.v1 import (
     service_pb2,
 )
+from triald.api.service import SessionService
+from triald.api.servicers.refusals import REFUSAL_METADATA_KEY
 
 log = logging.getLogger(__name__)
 

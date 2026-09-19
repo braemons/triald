@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The `.tdr` taxonomy, and the three places in this repository that restate it.
 
-`proto/triald/v1/outcomes.proto` is the taxonomy — a protobuf enum, whose value
+`proto/braemons/v1/trial_outcome.proto` is the taxonomy — a protobuf enum, whose value
 names protobuf's JSON mapping puts on the wire and whose numbers are the `.tdr`
 codes. `tools/check_outcomes.py` does the reading; this runs it in the test
 suite so a drift is a red test rather than something CI alone would notice.

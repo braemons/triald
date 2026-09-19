@@ -5,20 +5,26 @@ from __future__ import annotations
 
 from typing import Any
 
+from triald._proto.triald.v1 import (
+    common_pb2,
+    config_pb2,
+)
 from triald.counters import TrialCountCriterion
 from triald.outcomes import AcceptancePolicy
 from triald.selection import Ordering
 from triald.session import SessionConfig
-from triald.v1 import (  # ty: ignore[unresolved-import]  (resolved at runtime by __init__'s __path__)
-    common_pb2,
-    config_pb2,
-)
 
 #: The acceptance flags, in the order the message declares them. Derived from
 #: the message rather than written twice: `tools/check_outcomes.py` already
 #: holds these names to the outcome enum, so a new outcome cannot reach here
 #: without a flag, and a flag cannot arrive here without an outcome.
-ACCEPTANCE_FLAGS = tuple(field.name for field in config_pb2.Acceptance.DESCRIPTOR.fields)
+#: protobuf ships no descriptor stubs a checker can follow, so `.fields` reads
+#: as unknown. It is exercised on every import of this module.
+_ACCEPTANCE_DESCRIPTOR = config_pb2.Acceptance.DESCRIPTOR
+ACCEPTANCE_FLAGS = tuple(
+    field.name
+    for field in _ACCEPTANCE_DESCRIPTOR.fields  # ty: ignore[unresolved-attribute]
+)
 
 #: What each wire enum value means to the daemon. `UNSPECIFIED` is not in the
 #: tables: it means the field was omitted, and what an omitted criterion means
@@ -49,7 +55,8 @@ def criterion_from_wire(
     if value == common_pb2.TRIAL_COUNT_CRITERION_UNSPECIFIED:
         return when_omitted
     try:
-        return _CRITERIA[value]
+        # The generated stub types the key as the enum; the value is its int.
+        return _CRITERIA[value]  # ty: ignore[invalid-argument-type]
     except KeyError:
         raise Refused(f"{value} is not a criterion this daemon knows") from None
 
@@ -58,7 +65,7 @@ def ordering_from_wire(value: int) -> Ordering:
     if value == common_pb2.ORDERING_UNSPECIFIED:
         return Ordering.RANDOM_IN_ROUND
     try:
-        return _ORDERINGS[value]
+        return _ORDERINGS[value]  # ty: ignore[invalid-argument-type]
     except KeyError:
         raise Refused(f"{value} is not an ordering this daemon knows") from None
 

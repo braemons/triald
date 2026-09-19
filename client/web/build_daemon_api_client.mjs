@@ -28,12 +28,16 @@ const bundle = join(here, "elements/daemon_api_client.js");
 rmSync(generated, { recursive: true, force: true });
 mkdirSync(generated, { recursive: true });
 
-// Every file in the package, found rather than listed: a proto added to the
-// interface is part of the interface, and a list here is a way to leave one out.
-const protoFiles = readdirSync(join(protoRoot, "triald/v1"))
-  .filter((name) => name.endsWith(".proto"))
-  .sort()
-  .map((name) => `${protoRoot}/triald/v1/${name}`);
+// Every file in both packages, found rather than listed: a proto added to the
+// interface is part of the interface, and a list here is a way to leave one
+// out. `braemons/v1/` is what the family agrees on — today the `.tdr` outcome
+// taxonomy, which statemachined speaks too and neither daemon owns.
+const protoFiles = ["triald/v1", "braemons/v1"].flatMap((directory) =>
+  readdirSync(join(protoRoot, directory))
+    .filter((name) => name.endsWith(".proto"))
+    .sort()
+    .map((name) => `${protoRoot}/${directory}/${name}`),
+);
 
 execFileSync(
   "protoc",

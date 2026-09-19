@@ -1,10 +1,10 @@
-from triald.v1 import common_pb2 as _common_pb2
-from triald.v1 import config_pb2 as _config_pb2
-from triald.v1 import debug_pb2 as _debug_pb2
-from triald.v1 import policy_pb2 as _policy_pb2
-from triald.v1 import session_pb2 as _session_pb2
-from triald.v1 import sets_pb2 as _sets_pb2
-from triald.v1 import trial_pb2 as _trial_pb2
+from triald._proto.triald.v1 import common_pb2 as _common_pb2
+from triald._proto.triald.v1 import config_pb2 as _config_pb2
+from triald._proto.triald.v1 import debug_pb2 as _debug_pb2
+from triald._proto.triald.v1 import policy_pb2 as _policy_pb2
+from triald._proto.triald.v1 import session_pb2 as _session_pb2
+from triald._proto.triald.v1 import sets_pb2 as _sets_pb2
+from triald._proto.triald.v1 import trial_pb2 as _trial_pb2
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
 from typing import ClassVar as _ClassVar, Optional as _Optional

@@ -10,13 +10,13 @@ from __future__ import annotations
 
 import grpc
 
-from triald.api import convert
-from triald.api.service import Refusal, ServiceError, SessionService
-from triald.api.servicers.refusals import answering
-from triald.v1 import (  # ty: ignore[unresolved-import]  (resolved at runtime by __init__'s __path__)
+from triald._proto.triald.v1 import (
     service_pb2_grpc,
     trial_pb2,
 )
+from triald.api import convert
+from triald.api.service import Refusal, ServiceError, SessionService
+from triald.api.servicers.refusals import answering
 
 
 class TrialServicer(service_pb2_grpc.TrialServicer):

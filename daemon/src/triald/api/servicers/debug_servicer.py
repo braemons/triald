@@ -11,14 +11,14 @@ from __future__ import annotations
 
 import grpc
 
+from triald._proto.triald.v1 import (
+    debug_pb2,
+    service_pb2_grpc,
+)
 from triald.api import convert
 from triald.api.service import SessionService, SimSettings
 from triald.api.servicers import state_message
 from triald.api.servicers.refusals import answering
-from triald.v1 import (  # ty: ignore[unresolved-import]  (resolved at runtime by __init__'s __path__)
-    debug_pb2,
-    service_pb2_grpc,
-)
 
 
 class DebugServicer(service_pb2_grpc.DebugServicer):

@@ -24,11 +24,11 @@ through `triald.runner.run_trial`, exactly as a real session does.
 
 from __future__ import annotations
 
-from triald.api import convert
-from triald.api.service import SessionService
-from triald.v1 import (  # ty: ignore[unresolved-import]  (resolved at runtime by __init__'s __path__)
+from triald._proto.triald.v1 import (
     session_pb2,
 )
+from triald.api import convert
+from triald.api.service import SessionService
 
 
 def state_message(service: SessionService) -> session_pb2.SessionState:

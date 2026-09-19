@@ -3,14 +3,14 @@
 import grpc
 import warnings
 
-from triald.v1 import common_pb2 as triald_dot_v1_dot_common__pb2
-from triald.v1 import config_pb2 as triald_dot_v1_dot_config__pb2
-from triald.v1 import debug_pb2 as triald_dot_v1_dot_debug__pb2
-from triald.v1 import policy_pb2 as triald_dot_v1_dot_policy__pb2
-from triald.v1 import service_pb2 as triald_dot_v1_dot_service__pb2
-from triald.v1 import session_pb2 as triald_dot_v1_dot_session__pb2
-from triald.v1 import sets_pb2 as triald_dot_v1_dot_sets__pb2
-from triald.v1 import trial_pb2 as triald_dot_v1_dot_trial__pb2
+from triald._proto.triald.v1 import common_pb2 as triald_dot_v1_dot_common__pb2
+from triald._proto.triald.v1 import config_pb2 as triald_dot_v1_dot_config__pb2
+from triald._proto.triald.v1 import debug_pb2 as triald_dot_v1_dot_debug__pb2
+from triald._proto.triald.v1 import policy_pb2 as triald_dot_v1_dot_policy__pb2
+from triald._proto.triald.v1 import service_pb2 as triald_dot_v1_dot_service__pb2
+from triald._proto.triald.v1 import session_pb2 as triald_dot_v1_dot_session__pb2
+from triald._proto.triald.v1 import sets_pb2 as triald_dot_v1_dot_sets__pb2
+from triald._proto.triald.v1 import trial_pb2 as triald_dot_v1_dot_trial__pb2
 
 GRPC_GENERATED_VERSION = '1.84.0'
 GRPC_VERSION = grpc.__version__

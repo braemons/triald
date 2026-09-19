@@ -10,13 +10,13 @@ from __future__ import annotations
 
 import grpc
 
-from triald.api.service import SessionService
-from triald.api.servicers import state_message
-from triald.api.servicers.refusals import answering
-from triald.v1 import (  # ty: ignore[unresolved-import]  (resolved at runtime by __init__'s __path__)
+from triald._proto.triald.v1 import (
     service_pb2_grpc,
     session_pb2,
 )
+from triald.api.service import SessionService
+from triald.api.servicers import state_message
+from triald.api.servicers.refusals import answering
 
 #: What `Stop` records when the caller gives no reason. Kept out of the proto:
 #: an empty `reason` means "not said", and the daemon says what that means.

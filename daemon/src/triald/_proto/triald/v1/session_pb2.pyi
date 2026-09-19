@@ -1,10 +1,10 @@
 import datetime
 
 from google.protobuf import timestamp_pb2 as _timestamp_pb2
-from triald.v1 import common_pb2 as _common_pb2
-from triald.v1 import config_pb2 as _config_pb2
-from triald.v1 import policy_pb2 as _policy_pb2
-from triald.v1 import trial_pb2 as _trial_pb2
+from triald._proto.triald.v1 import common_pb2 as _common_pb2
+from triald._proto.triald.v1 import config_pb2 as _config_pb2
+from triald._proto.triald.v1 import policy_pb2 as _policy_pb2
+from triald._proto.triald.v1 import trial_pb2 as _trial_pb2
 from google.protobuf.internal import containers as _containers
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import dataclasses
 
-from triald.v1 import (  # ty: ignore[unresolved-import]  (resolved at runtime by __init__'s __path__)
+from triald._proto.triald.v1 import (
     debug_pb2,
 )
 

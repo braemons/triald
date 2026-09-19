@@ -26,7 +26,7 @@ from triald.outcomes import Manipulandum, OutcomeReport, TrialOutcome
 from triald.selection import Ordering
 from triald.session import Session, SessionConfig
 from triald.trialtypes import SwitchRule, TrialType, TrialTypeSet, TrialTypeStore
-from triald.v1 import config_pb2, sets_pb2
+from triald._proto.triald.v1 import config_pb2, sets_pb2
 
 
 def a_set() -> TrialTypeSet:
@@ -160,7 +160,9 @@ def test_an_absent_precise_fixation_means_fixation_held():
     report = convert.outcome_report_from_wire(
         wire.from_json(
             '{"trial_id": "1", "outcome": "HIT"}',
-            __import__("triald.v1.trial_pb2", fromlist=["OutcomeReport"]).OutcomeReport,
+            __import__(
+                "triald._proto.triald.v1.trial_pb2", fromlist=["OutcomeReport"]
+            ).OutcomeReport,
         )
     )
     assert report.precise_fixation is True

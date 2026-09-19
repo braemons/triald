@@ -180,6 +180,14 @@ Roughly in dependency order — nothing later is imported by anything earlier.
 which is why it is a subpackage rather than mixed in. **The API is
 `proto/triald/v1/` — types and behaviours both, authored by hand.**
 
+Beside it, `proto/braemons/v1/` holds what the *family* agrees on rather than
+what this daemon offers. There is exactly one thing in it: the `.tdr` outcome
+taxonomy, which statemachined reports in and triald records in, and which
+neither owns. The bar for a second is the same — a type two daemons must agree
+on and neither is the authority for. The rpc addresses are **not** prefixed:
+`triald.v1.Trial/ReportOutcome` is a string a person types, and there is one
+triald on a rig.
+
 Not built yet: `client/{python,matlab,bonsai}`, the `Environment` and `Records`
 API groups, the CodeMirror policy editor and the configurable uPlot performance
 charts. All specified in `dev/PLAN.md`.

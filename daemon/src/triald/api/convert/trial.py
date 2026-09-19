@@ -9,11 +9,11 @@ from google.protobuf.struct_pb2 import (
     Struct,  # ty: ignore[unresolved-import]  (built at runtime by protobuf's builder)
 )
 
-from triald.outcomes import FrameLoss, Manipulandum, OutcomeReport, TrialOutcome
-from triald.state import TrialRecord, TrialSpec
-from triald.v1 import (  # ty: ignore[unresolved-import]  (resolved at runtime by __init__'s __path__)
+from triald._proto.triald.v1 import (
     trial_pb2,
 )
+from triald.outcomes import FrameLoss, Manipulandum, OutcomeReport, TrialOutcome
+from triald.state import TrialRecord, TrialSpec
 
 
 def trial_spec_to_wire(spec: TrialSpec) -> trial_pb2.TrialSpec:

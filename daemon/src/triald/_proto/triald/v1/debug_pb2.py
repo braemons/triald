@@ -22,7 +22,7 @@ _runtime_version.ValidateProtobufRuntimeVersion(
 _sym_db = _symbol_database.Default()
 
 
-from triald.v1 import session_pb2 as triald_dot_v1_dot_session__pb2
+from triald._proto.triald.v1 import session_pb2 as triald_dot_v1_dot_session__pb2
 
 
 DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x15triald/v1/debug.proto\x12\ttriald.v1\x1a\x17triald/v1/session.proto\"\x8e\x03\n\x0bSimSettings\x12\x1a\n\x08hit_rate\x18\x01 \x01(\x01R\x08hit_rate\x12*\n\x10not_started_rate\x18\x02 \x01(\x01R\x10not_started_rate\x12&\n\x0e\x65ye_error_rate\x18\x03 \x01(\x01R\x0e\x65ye_error_rate\x12\x1e\n\nearly_rate\x18\x04 \x01(\x01R\nearly_rate\x12(\n\x0f\x66rame_loss_rate\x18\x05 \x01(\x01R\x0f\x66rame_loss_rate\x12\x38\n\x17imprecise_fixation_rate\x18\x06 \x01(\x01R\x17imprecise_fixation_rate\x12U\n\x10hit_rate_by_type\x18\x07 \x03(\x0b\x32).triald.v1.SimSettings.HitRateByTypeEntryR\x10hit_rate_by_type\x1a\x34\n\x12HitRateByTypeEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x01:\x02\x38\x01\"\x1d\n\x0bStepRequest\x12\x0e\n\x06trials\x18\x01 \x01(\x05\"\x8c\x01\n\nStepResult\x12\x0e\n\x06trials\x18\x01 \x01(\x05\x12\x0f\n\x07stopped\x18\x02 \x01(\x08\x12%\n\x0bstop_reason\x18\x03 \x01(\tH\x00R\x0bstop_reason\x88\x01\x01\x12&\n\x05state\x18\x04 \x01(\x0b\x32\x17.triald.v1.SessionStateB\x0e\n\x0c_stop_reason\"<\n\x07\x46reeRun\x12\x0f\n\x07running\x18\x01 \x01(\x08\x12 \n\x0binterval_ms\x18\x02 \x01(\x05R\x0binterval_ms\"B\n\rFreeRunStatus\x12\x0f\n\x07running\x18\x01 \x01(\x08\x12 \n\x0binterval_ms\x18\x02 \x01(\x05R\x0binterval_msb\x06proto3')

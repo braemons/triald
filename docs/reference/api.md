@@ -50,6 +50,13 @@ in the JSON a browser sees, in the `trials.jsonl` line on disk and in both
 clients. Protobuf's default would have camel-cased the JSON and given the same
 field two names.
 
+**Two proto packages, and only one of them is this daemon's.**
+`proto/triald/v1/` is the interface. `proto/braemons/v1/` is what the family
+agrees on — today the `.tdr` outcome taxonomy alone, which statemachined
+reports in and triald records in, and which is vendored into both
+byte-identically because neither owns it. Nothing about an *address* is
+prefixed: an rpc is `triald.v1.Trial/ReportOutcome`.
+
 **Every rpc has its own request message**, including the fifteen that carry
 nothing. `google.protobuf.Empty` can never grow a field, so an rpc that took one
 would need a second rpc the day it learns an argument; `ArmRequest{}` just grows

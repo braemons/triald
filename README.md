@@ -120,6 +120,8 @@ and sink operators map onto the state stream directly).
 
 - [`proto/triald/v1/`](proto/triald/v1/) — **the API itself**: every type and
   every rpc, with what each one refuses and why, authored by hand.
+  [`proto/braemons/v1/`](proto/braemons/v1/) beside it holds the one thing the
+  family shares: the `.tdr` outcome taxonomy.
 - [`docs/reference/api.md`](docs/reference/api.md) — the API for a person: what
   an rpc is for, when to use one rather than another, and what a refusal means.
 - [`client/python/`](client/python/) — the Python client and `trialctl`. Two

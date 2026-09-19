@@ -12,8 +12,8 @@ adding an rpc to `service.proto` fails this test until something implements it.
 from __future__ import annotations
 
 import pytest
-from triald.v1 import service_pb2, service_pb2_grpc
 
+from triald._proto.triald.v1 import service_pb2, service_pb2_grpc
 from triald.api import grpc_server
 
 #: Which class implements which service — read from the daemon rather than

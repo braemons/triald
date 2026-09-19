@@ -16,18 +16,21 @@ The public surface is what a policy needs:
 
 from __future__ import annotations
 
-# Let `from triald.v1 import common_pb2` — which is what the generated modules
-# write to reach each other — resolve inside `_proto/` without those modules
-# appearing in this package's own namespace.
-#
 # **The generated types are private and stay private.** They are the shapes on
 # the wire; `triald.api.convert` is the seam, and nothing a person imports from
-# `triald` is a protobuf message. vstimd's client does exactly this and for the
-# same reason.
-import os as _os
-
-__path__ = [*__path__, _os.path.join(_os.path.dirname(__file__), "_proto", "triald")]
-
+# `triald` is a protobuf message.
+#
+# They live in `_proto/`, and they reach each other by an absolute path inside
+# it — `from triald._proto.triald.v1 import common_pb2`. `make proto` rewrites
+# protoc's own `from triald.v1 import ...` into that, because protoc roots an
+# import at the proto path and `triald` is this package.
+#
+# This line used to extend `__path__` instead, so that `triald.v1` resolved at
+# runtime. It worked, and no static checker could follow it — every import site
+# carried a suppression saying so. It also could not work at all once a
+# second proto package arrived: `braemons/v1/trial_outcome.proto` is the
+# taxonomy both this daemon and statemachined speak, and `from braemons.v1
+# import ...` has no package here to hang off.
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _installed_version
 

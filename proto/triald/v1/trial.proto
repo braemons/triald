@@ -6,7 +6,7 @@ package triald.v1;
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 import "triald/v1/common.proto";
-import "triald/v1/outcomes.proto";
+import "braemons/v1/trial_outcome.proto";
 
 // Where the first lost frame of a trial was seen.
 message FrameLoss {
@@ -36,7 +36,7 @@ message OutcomeReport {
   // reading it as zero produced.
   optional int64 trial_id = 1 [json_name = "trial_id"];
 
-  TrialOutcome outcome = 2;
+  braemons.v1.TrialOutcome outcome = 2;
   Manipulandum manipulandum = 3;
 
   optional double reaction_time_ms = 4 [json_name = "reaction_time_ms"];

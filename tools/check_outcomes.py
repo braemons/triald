@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Every copy of the `.tdr` taxonomy in this repository, against the enum.
 
-`proto/triald/v1/outcomes.proto` **is** the taxonomy. This holds the three
+`proto/braemons/v1/trial_outcome.proto` **is** the taxonomy. This holds the three
 places that restate it to what it says:
 
   * `triald.outcomes.TrialOutcome` — the Python enum the daemon works in;
@@ -36,7 +36,7 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent.parent
-PROTO = HERE / "proto" / "triald" / "v1" / "outcomes.proto"
+PROTO = HERE / "proto" / "braemons" / "v1" / "trial_outcome.proto"
 CONFIG_PROTO = HERE / "proto" / "triald" / "v1" / "config.proto"
 PYTHON_ENUM = HERE / "daemon" / "src" / "triald" / "outcomes.py"
 PANEL = HERE / "client" / "web" / "elements" / "counters_panel_element.js"
@@ -93,7 +93,7 @@ def between(source: str, start: str, end: str) -> str:
 def problems() -> list[str]:
     canonical = taxonomy()
     if not canonical:
-        return ["proto/triald/v1/outcomes.proto has no enum values this reader can see"]
+        return ["proto/braemons/v1/trial_outcome.proto has no enum values this reader can see"]
 
     found: list[str] = []
     countable = {name for name in canonical if name not in NEVER_ASSIGNED}
@@ -134,7 +134,7 @@ def main() -> int:
         for problem in found:
             print(f"  {problem}")
         print()
-        print("proto/triald/v1/outcomes.proto is the taxonomy. Change it there first,")
+        print("proto/braemons/v1/trial_outcome.proto is the taxonomy. Change it there first,")
         print("then follow it in the Python enum, the Acceptance message and the panel.")
         return 1
     print(f"the taxonomy and its three copies agree ({len(taxonomy())} outcomes)")

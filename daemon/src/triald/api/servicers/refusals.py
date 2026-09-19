@@ -26,10 +26,10 @@ from collections.abc import Awaitable, Callable
 
 import grpc
 
-from triald.api.service import Refusal, ServiceError
-from triald.v1 import (  # ty: ignore[unresolved-import]  (resolved at runtime by __init__'s __path__)
+from triald._proto.triald.v1 import (
     common_pb2,
 )
+from triald.api.service import Refusal, ServiceError
 
 #: Where the typed refusal rides. `-bin` is gRPC's own spelling for a metadata
 #: value that is bytes rather than ASCII, which is what lets `detail` hold a

@@ -5,7 +5,8 @@
 UV ?= uv
 PROTO_ROOT := ../../proto
 PROTO_OUT  := triald_client/_proto
-PROTOS     := $(wildcard $(PROTO_ROOT)/triald/v1/*.proto)
+PROTOS     := $(wildcard $(PROTO_ROOT)/triald/v1/*.proto) \
+              $(wildcard $(PROTO_ROOT)/braemons/v1/*.proto)
 
 .PHONY: help proto generate-into check-proto test test-unit lint fmt typecheck check build clean
 
@@ -38,7 +39,8 @@ generate-into:
 	  --python_out=$(OUT) --pyi_out=$(OUT) --grpc_python_out=$(OUT) \
 	  $(PROTOS)
 	@find $(OUT) -name '*.py' -o -name '*.pyi' | xargs sed -i \
-	  's/^from triald\.v1 import /from triald_client._proto.triald.v1 import /'
+	  -e 's/^from triald\.v1 import /from triald_client._proto.triald.v1 import /' \
+	  -e 's/^from braemons\.v1 import /from triald_client._proto.braemons.v1 import /'
 
 # Against a fresh generation rather than against git: a *new* generated file is
 # untracked, and `git diff` says nothing at all about an untracked file. A

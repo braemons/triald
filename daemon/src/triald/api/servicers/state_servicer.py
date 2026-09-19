@@ -8,13 +8,13 @@ from collections.abc import AsyncIterator
 
 import grpc
 
-from triald.api import convert
-from triald.api.service import SessionService
-from triald.api.servicers import state_message
-from triald.v1 import (  # ty: ignore[unresolved-import]  (resolved at runtime by __init__'s __path__)
+from triald._proto.triald.v1 import (
     service_pb2_grpc,
     session_pb2,
 )
+from triald.api import convert
+from triald.api.service import SessionService
+from triald.api.servicers import state_message
 
 
 class StateServicer(service_pb2_grpc.StateServicer):

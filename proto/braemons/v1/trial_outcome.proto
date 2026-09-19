@@ -1,16 +1,27 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 syntax = "proto3";
 
-package triald.v1;
+package braemons.v1;
 
 // How a trial ended — the `.tdr` outcome taxonomy.
 //
 // **This enum is the taxonomy.** It was a JSON file with five vendored copies
 // and a checker that read source code with regexes
 // (`contracts/INTERACTIONS.md` §6); it is now a protobuf enum, which is the
-// thing that file was imitating. Two daemons need it — statemachined reports an
-// outcome and triald records one — and it is vendored into statemachined
+// thing that file was imitating. It is vendored into statemachined
 // byte-identically, which is the same arrangement with a better file format.
+//
+// **`braemons.v1`, and not `triald.v1`, because neither daemon owns it.**
+// statemachined reports an outcome and triald records one; the taxonomy is the
+// agreement between them, and a package named after one of the two would make
+// the other import its neighbour's interface to say what a trial did. It is
+// the only thing in `braemons.v1` today, and the bar for a second is the same:
+// a type that two daemons must agree on and neither is the authority for.
+//
+// The *addresses* are not prefixed — an rpc is `triald.v1.Trial/ReportOutcome`,
+// because that is a string a person types at a terminal, and there is exactly
+// one triald on a rig. A family prefix there would be justified by a collision
+// that cannot happen.
 //
 // **The numbers are a wire contract and are never renumbered.** They are in
 // every `.tdr` the lab has written and every analysis script that reads one.

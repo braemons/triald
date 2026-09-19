@@ -156,7 +156,7 @@ class Answer:
     def refusal(self):
         import base64
 
-        from triald.v1 import common_pb2
+        from triald._proto.triald.v1 import common_pb2
 
         encoded = self.json["details"][0]["value"]
         return common_pb2.Error.FromString(
@@ -402,7 +402,7 @@ def test_an_unknown_outcome_name_is_refused_with_the_alternatives(edge: Edge):
     assert response.status == 400  # invalid_argument
     # The refusal names the field and the enum type rather than listing every
     # valid value, which is what protobuf's parser says. The values themselves
-    # are one fetch away, in proto/triald/v1/outcomes.proto.
+    # are one fetch away, in proto/braemons/v1/trial_outcome.proto.
     assert "outcome" in response.detail
     assert "TrialOutcome" in response.detail
 
@@ -844,7 +844,7 @@ def test_every_ordering_and_criterion_is_in_the_interface(edge: Edge):
     `proto/triald/v1/`, and the generated enum descriptors are what a client
     would generate from. Same check, one description instead of two.
     """
-    from triald.v1 import common_pb2
+    from triald._proto.triald.v1 import common_pb2
 
     on_the_wire = set(common_pb2.Ordering.keys()) - {"ORDERING_UNSPECIFIED"}
     assert on_the_wire == {f"ORDERING_{o.name}" for o in Ordering}
