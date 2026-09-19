@@ -1,0 +1,871 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+"""The API: the wire shape, the routes, and the debug controls.
+
+Two things are worth stating about what is tested here.
+
+**The record shape and the wire shape must not drift.** ``trials.jsonl`` and the
+WebSocket stream carry the same trial, and one test asserts they carry it
+identically. That is the whole reason the models were written to mirror
+``as_dict()`` rather than to be nicer than it.
+
+**The debug controls are not a second code path.** A ``/api/debug/step`` goes
+through :func:`triald.runner.run_trial`, so the counted-versus-accepted
+distinction has to survive it exactly as it does on a rig. It is tested here for
+the same reason it is tested in ``test_session.py``.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import datetime as dt
+import json
+import struct
+import time
+
+import pytest
+
+from triald.api import SessionService, convert, wire
+from triald.api.grpc_server import build_servicers
+from triald.api.web_edge import build_edge
+from triald.counters import TrialCountCriterion
+from triald.selection import Ordering
+from triald.session import SessionConfig
+from triald.trialtypes import SwitchRule, TrialType, TrialTypeSet, TrialTypeStore
+
+
+def make_store() -> TrialTypeStore:
+    """Two sets that hand over to each other, which is what a sequence is."""
+    return TrialTypeStore(
+        [
+            TrialTypeSet(
+                name="easy",
+                trial_types=[
+                    TrialType(name="easy_a", trials_per_round=2, reward_ms=100),
+                    TrialType(name="easy_b", trials_per_round=2, reward_ms=110),
+                ],
+                switch_rule=SwitchRule(
+                    enabled=True,
+                    criterion=TrialCountCriterion.HITS,
+                    count=5,
+                    target="hard",
+                ),
+            ),
+            TrialTypeSet(
+                name="hard",
+                trial_types=[
+                    TrialType(name="hard_a", trials_per_round=1, reward_ms=150),
+                    TrialType(name="hard_b", trials_per_round=1, reward_ms=150),
+                ],
+            ),
+        ]
+    )
+
+
+@pytest.fixture
+def service() -> SessionService:
+    return SessionService(
+        make_store(),
+        SessionConfig(initial_set="easy", rounds=4, seed=0),
+    )
+
+
+class Enough(Exception):
+    """Stop a stream from inside `send`. The tests ask for a few frames of
+    something that never ends on its own."""
+
+
+def drive(
+    loop, app, method: str, path: str, body: bytes = b"", content_type: str = "", *, frames=0
+):
+    """One request against the ASGI app, synchronously.
+
+    Written out rather than pulled in: `httpx.ASGITransport` is async-only, so
+    using it would make all forty-nine of these tests `async def` and add an
+    asyncio plugin to say so. This is thirty lines and leaves the tests reading
+    like the tests they were.
+
+    **One loop for the whole fixture**, not one per call. The daemon keeps
+    things running between requests — the trial watchdog, free-run — and a
+    fresh `asyncio.run` each time would throw those away and quietly make the
+    tests that depend on them pass for the wrong reason.
+    """
+    collected: dict = {"status": None, "headers": [], "body": b"", "frames": []}
+
+    async def run():
+        events = [{"type": "http.request", "body": body, "more_body": False}]
+
+        async def receive():
+            return events.pop(0) if events else {"type": "http.disconnect"}
+
+        async def send(event):
+            if event["type"] == "http.response.start":
+                collected["status"] = event["status"]
+                collected["headers"] = {
+                    key.decode().lower(): value.decode() for key, value in event["headers"]
+                }
+            else:
+                chunk = event.get("body", b"")
+                if frames:
+                    collected["frames"].append(chunk)
+                    if len(collected["frames"]) >= frames:
+                        raise Enough
+                else:
+                    collected["body"] += chunk
+
+        headers = [(b"content-type", content_type.encode())] if content_type else []
+        with contextlib.suppress(Enough):
+            await app(
+                {"type": "http", "method": method, "path": path, "headers": headers},
+                receive,
+                send,
+            )
+
+    loop.run_until_complete(run())
+    return collected
+
+
+class Answer:
+    """One Connect answer, in the shapes a test asks about.
+
+    A refusal is a JSON body with a `code` and a `message`; the typed
+    `triald.v1.Error` rides in `details`, so `answer.refusal.error` here is the
+    same field a Python client reads out of trailing metadata over gRPC.
+    """
+
+    def __init__(self, result: dict) -> None:
+        self.status = result["status"]
+        self.headers = result["headers"]
+        self.body = result["body"]
+        self.text = result["body"].decode("utf-8", "replace")
+
+    @property
+    def json(self) -> dict:
+        """The body as JSON — lazily, because `get` also fetches panels."""
+        return json.loads(self.text) if self.text else {}
+
+    @property
+    def code(self) -> str:
+        return self.json.get("code", "")
+
+    @property
+    def detail(self) -> str:
+        return self.json.get("message", "")
+
+    @property
+    def refusal(self):
+        import base64
+
+        from triald.v1 import common_pb2
+
+        encoded = self.json["details"][0]["value"]
+        return common_pb2.Error.FromString(
+            base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
+        )
+
+
+class Edge:
+    """The daemon under test, addressed by rpc rather than by route."""
+
+    def __init__(self, app, loop) -> None:
+        self.app = app
+        self.loop = loop
+
+    def call(self, rpc: str, body: dict | None = None) -> Answer:
+        return Answer(
+            drive(
+                self.loop,
+                self.app,
+                "POST",
+                f"/triald.v1.{rpc}",
+                json.dumps(body or {}).encode(),
+                "application/json",
+            )
+        )
+
+    def settle(self, seconds: float) -> None:
+        """Let the daemon's own tasks run for a moment.
+
+        The loop only turns while a request is being driven, so a test that
+        waits on something the daemon does by itself — the trial watchdog,
+        free-run — has to say so rather than `time.sleep`, which would block
+        the one thread both of them share.
+        """
+        self.loop.run_until_complete(asyncio.sleep(seconds))
+
+    def get(self, path: str) -> Answer:
+        return Answer(drive(self.loop, self.app, "GET", path))
+
+    def stream(self, rpc: str, how_many: int, body: dict | None = None) -> list[dict]:
+        """The first `how_many` frames of a server stream.
+
+        Each is enveloped — a flag byte, a big-endian length, the message — and
+        so is the request, which is the one asymmetry worth remembering about
+        the Connect streaming protocol.
+        """
+        payload = json.dumps(body or {}).encode()
+        result = drive(
+            self.loop,
+            self.app,
+            "POST",
+            f"/triald.v1.{rpc}",
+            struct.pack(">BI", 0, len(payload)) + payload,
+            "application/connect+json",
+            frames=how_many,
+        )
+        return [json.loads(frame[5:]) for frame in result["frames"]]
+
+
+@pytest.fixture
+def edge(service: SessionService) -> Edge:
+    loop = asyncio.new_event_loop()
+    # The watchdog, as `triald serve` starts it. It belongs to the daemon
+    # rather than to a transport, and a test that drove only the edge would
+    # otherwise be testing a daemon that cannot end a trial nobody answered.
+    loop.run_until_complete(service.start_watchdog())
+    try:
+        yield Edge(build_edge(service, build_servicers(service)), loop)
+    finally:
+        loop.close()
+
+
+def next_trial(edge: Edge) -> int:
+    """Select a trial and give its number, which its outcome has to carry."""
+    answer = edge.call("Trial/Next")
+    assert answer.status == 200, answer.text
+    # A 64-bit number is a string on the wire; the tests do arithmetic on it.
+    return int(answer.json["trial_number"])
+
+
+def arm(edge: Edge) -> dict:
+    answer = edge.call("Session/Arm")
+    assert answer.status == 200, answer.text
+    return answer.json
+
+
+# -- the snapshot ---------------------------------------------------------------
+
+
+def test_state_is_readable_before_anything_is_armed(edge: Edge):
+    state = edge.call("State/ReadState").json
+    assert state["armed"] is False
+    assert state["running"] is False
+    assert state["set_name"] == "easy"
+    # The counters table has its rows before the first trial, so the UI is not
+    # empty while somebody decides whether to start.
+    assert [row["name"] for row in state["counters"]] == ["easy_a", "easy_b"]
+
+
+def test_arming_publishes_a_full_snapshot(edge: Edge):
+    state = arm(edge)
+    assert state["running"] is True
+    assert state["armed"] is True
+    assert state["trials_remaining"] == 4
+    assert state["trials_per_round"] == 4
+    assert sum(row["p_next"] for row in state["counters"]) == pytest.approx(1.0)
+
+
+def test_arming_twice_is_refused_while_one_runs(edge: Edge):
+    arm(edge)
+    response = edge.call("Session/Arm")
+    assert response.status == 412  # failed_precondition
+    assert response.refusal.error == "session"
+    assert "already running" in response.detail
+
+
+def test_the_trial_loop_refuses_to_run_unarmed(edge: Edge):
+    response = edge.call("Trial/Next")
+    assert response.status == 412  # failed_precondition
+    assert "arm it first" in response.detail
+
+
+# -- one trial by hand ----------------------------------------------------------
+
+
+def test_a_trial_can_be_selected_and_reported(edge: Edge):
+    arm(edge)
+    spec = edge.call("Trial/Next").json
+    assert spec["trial_number"] == "1"
+    assert spec["set_name"] == "easy"
+
+    record = edge.call("Trial/ReportOutcome", {"trial_id": 1, "outcome": "HIT"}).json
+    assert record["outcome"]["code"] == 1
+    assert record["accepted"] is True
+    assert "refusal_reason" not in record
+
+
+def test_an_outcome_may_be_given_by_code_or_by_name(edge: Edge):
+    arm(edge)
+    trial = next_trial(edge)
+    by_name = edge.call("Trial/ReportOutcome", {"trial_id": trial, "outcome": "EYE_ERROR"}).json
+    trial = next_trial(edge)
+    by_code = edge.call("Trial/ReportOutcome", {"trial_id": trial, "outcome": 7}).json
+    assert by_name["outcome"]["code"] == by_code["outcome"]["code"] == 7
+
+
+def test_an_outcome_for_another_trial_is_refused(edge: Edge):
+    # The failure this exists to stop: a report that arrives late is attributed
+    # to the trial *after* the one it belongs to, and the dataset is quietly
+    # mislabelled. Refusing is the only safe answer - triald cannot know whether
+    # the late one or the current one is the truth.
+    arm(edge)
+    trial = next_trial(edge)
+
+    response = edge.call("Trial/ReportOutcome", {"trial_id": trial - 1, "outcome": "HIT"})
+    assert response.status == 412  # failed_precondition
+    assert f"trial {trial} is the one in flight" in response.detail
+
+    # And the refused report changed nothing: the trial is still in flight.
+    state = edge.call("State/ReadState").json
+    assert int(state["current"]["trial_number"]) == trial
+    assert state["totals"]["total"] == 0
+
+
+def test_an_outcome_without_a_trial_id_is_refused(edge: Edge):
+    # Required, not defaulted. A default would make the check silently optional
+    # for exactly the caller that needs it - the one on the far end of a wire.
+    arm(edge)
+    next_trial(edge)
+
+    response = edge.call("Trial/ReportOutcome", {"outcome": "HIT"})
+    assert response.status == 400  # invalid_argument
+    assert "trial_id" in response.text
+
+
+def test_the_trial_cap_reaches_the_wire_and_shows_on_the_trial(edge: Edge):
+    # The deadline is published, because "why is this session full of
+    # NEVER_FINISHED" is answered by what the trial was allowed to take.
+    edge.call("Config/PatchConfig", {"trial_cap_ms": 4000})
+    arm(edge)
+    spec = edge.call("Trial/Next").json
+
+    assert edge.call("State/ReadState").json["config"]["trial_cap_ms"] == 4000
+    assert spec["deadline"] is not None
+    assert spec["deadline"] > spec["started_at"]
+
+
+def test_no_cap_means_no_deadline_on_the_wire(edge: Edge):
+    arm(edge)
+    # Absent rather than null: no cap means the field is not on the wire at all.
+    assert "deadline" not in edge.call("Trial/Next").json
+
+
+def test_never_finished_is_refused_by_default_and_can_be_accepted(edge: Edge):
+    # It is triald's own verdict that nothing reported the trial, so it consumes
+    # nothing from the round. The flag exists like the other ten, and a rig that
+    # wants such trials counted can say so.
+    assert edge.call("State/ReadState").json["config"]["acceptance"]["never_finished"] is False
+
+    result = edge.call("Config/PatchConfig", {"acceptance": {"never_finished": True}}).json
+    assert result["changed"] == ["acceptance"]
+    assert edge.call("State/ReadState").json["config"]["acceptance"]["never_finished"] is True
+
+
+def test_the_watchdog_expires_a_trial_nobody_answers(edge: Edge):
+    """The whole point, through the real app: nothing reports the trial, and
+    triald ends it by itself rather than waiting for ever.
+
+    A short cap and the service's own interval, so this waits on the daemon
+    rather than on a sleep chosen to be long enough.
+    """
+    edge.call("Config/PatchConfig", {"trial_cap_ms": 1})
+    arm(edge)
+    trial = next_trial(edge)
+
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        state = edge.call("State/ReadState").json
+        if "current" not in state:
+            break
+        edge.settle(0.05)
+
+    state = edge.call("State/ReadState").json
+    assert "current" not in state, "the watchdog never fired"
+    assert int(state["last"]["trial"]["trial_number"]) == trial
+    assert state["last"]["outcome"]["name"] == "NEVER_FINISHED"
+    assert state["last"]["outcome"]["code"] == 11
+    assert state["last"]["accepted"] is False
+    # And the session is still running: a dead executor costs one trial.
+    assert state["running"] is True
+
+
+def test_an_unknown_outcome_name_is_refused_with_the_alternatives(edge: Edge):
+    arm(edge)
+    trial = next_trial(edge)
+    response = edge.call("Trial/ReportOutcome", {"trial_id": trial, "outcome": "SPLENDID"})
+    assert response.status == 400  # invalid_argument
+    # The refusal names the field and the enum type rather than listing every
+    # valid value, which is what protobuf's parser says. The values themselves
+    # are one fetch away, in proto/triald/v1/outcomes.proto.
+    assert "outcome" in response.detail
+    assert "TrialOutcome" in response.detail
+
+
+def test_two_selections_without_a_result_are_refused(edge: Edge):
+    # The rule that stops one trial's result being attributed to another.
+    arm(edge)
+    edge.call("Trial/Next")
+    response = edge.call("Trial/Next")
+    assert response.status == 412  # failed_precondition
+    assert "still in flight" in response.detail
+
+
+def test_a_cancelled_trial_is_recorded_rather_than_dropped(edge: Edge):
+    arm(edge)
+    edge.call("Trial/Next")
+    record = edge.call("Trial/Cancel", {"reason": "the door opened"}).json
+    assert record["outcome"]["name"] == "CANCELLED"
+    assert record["outcome"]["note"] == "the door opened"
+    assert record["accepted"] is False
+
+
+def test_frame_loss_vetoes_an_otherwise_accepted_hit(edge: Edge):
+    """A hit that lost a frame is still a hit: counted, but not accepted."""
+    arm(edge)
+    edge.call("Config/PatchConfig", {"acceptance": {"frame_loss": False}})
+    trial = next_trial(edge)
+    record = edge.call(
+        "Trial/ReportOutcome",
+        {"trial_id": trial, "outcome": "HIT", "frame_loss": {"interval": 1, "frame": 6}},
+    ).json
+
+    assert record["accepted"] is False
+    assert "frame loss" in record["refusal_reason"]
+
+    state = edge.call("State/ReadState").json
+    assert state["totals"]["total"] == 1
+    assert state["totals"]["accepted"] == 0
+    assert state["totals"]["hits"] == 1  # counted, and it still moves the set on
+
+
+def test_imprecise_fixation_vetoes_on_its_own(edge: Edge):
+    arm(edge)
+    edge.call("Config/PatchConfig", {"acceptance": {"imprecise_fixation": False}})
+    trial = next_trial(edge)
+    record = edge.call(
+        "Trial/ReportOutcome", {"trial_id": trial, "outcome": "HIT", "precise_fixation": False}
+    ).json
+    assert record["accepted"] is False
+    assert "imprecise fixation" in record["refusal_reason"]
+
+
+# -- the debug stepper ----------------------------------------------------------
+
+
+def test_stepping_runs_whole_trials(edge: Edge):
+    arm(edge)
+    result = edge.call("Debug/Step", {"trials": 20}).json
+    # `trials` is an int32 and comes back a number; `trials_started` is an
+    # int64 and comes back a string. Both are protobuf's JSON mapping doing
+    # what it says, and the difference is worth seeing in one place.
+    assert result["trials"] == 20
+    assert result["state"]["trials_started"] == "20"
+    assert result["state"]["totals"]["total"] == 20
+
+
+def test_stepping_is_refused_with_a_trial_in_flight(edge: Edge):
+    arm(edge)
+    edge.call("Trial/Next")
+    response = edge.call("Debug/Step", {"trials": 1})
+    assert response.status == 412  # failed_precondition
+    assert "in flight" in response.detail
+
+
+def test_the_simulated_subject_can_be_retuned(edge: Edge):
+    arm(edge)
+    edge.call(
+        "Debug/WriteSim",
+        {
+            "hit_rate": 1.0,
+            "not_started_rate": 0.0,
+            "eye_error_rate": 0.0,
+            "early_rate": 0.0,
+        },
+    )
+    result = edge.call("Debug/Step", {"trials": 30}).json
+    assert result["state"]["totals"]["hits"] == 30
+
+
+def test_a_step_carries_the_session_into_the_next_set(edge: Edge):
+    """The switch rule fires from the API exactly as it does from the CLI."""
+    arm(edge)
+    edge.call(
+        "Debug/WriteSim",
+        {
+            "hit_rate": 1.0,
+            "not_started_rate": 0.0,
+            "eye_error_rate": 0.0,
+            "early_rate": 0.0,
+        },
+    )
+    result = edge.call("Debug/Step", {"trials": 10}).json
+    assert result["state"]["set_name"] == "hard"
+    # Session totals climb across a switch; the set's own progress starts again.
+    assert result["state"]["totals"]["total"] == 10
+    assert result["state"]["set_progress"]["hits"] < 10
+
+
+# -- config ---------------------------------------------------------------------
+
+
+def test_the_accept_flags_take_effect_on_the_next_trial(edge: Edge):
+    arm(edge)
+    result = edge.call("Config/PatchConfig", {"acceptance": {"eye_error": False}}).json
+    assert result["changed"] == ["acceptance"]
+    assert result["bag_rebuilt"] is False
+
+    trial = next_trial(edge)
+    record = edge.call("Trial/ReportOutcome", {"trial_id": trial, "outcome": "EYE_ERROR"}).json
+    assert record["accepted"] is False
+
+
+def test_changing_the_ordering_rebuilds_the_bag(edge: Edge):
+    arm(edge)
+    result = edge.call("Config/PatchConfig", {"ordering": "ORDERING_DESCENDING"}).json
+    assert result["changed"] == ["ordering"]
+    assert result["bag_rebuilt"] is True
+
+    state = edge.call("State/ReadState").json
+    # Descending is certain about what comes next, and it is the last type.
+    assert [row["p_next"] for row in state["counters"]] == [0.0, 1.0]
+
+
+def test_every_ordering_is_accepted_on_the_wire(edge: Edge):
+    arm(edge)
+    for ordering in Ordering:
+        # The wire spells an enum with its full name, so a client generated in
+        # another language agrees about the same byte.
+        on_the_wire = f"ORDERING_{ordering.name}"
+        response = edge.call("Config/PatchConfig", {"ordering": on_the_wire})
+        assert response.status == 200, ordering
+        assert response.json["config"]["ordering"] == on_the_wire
+
+
+def test_an_arm_time_setting_is_refused_while_running(edge: Edge):
+    arm(edge)
+    response = edge.call("Config/PatchConfig", {"extend_trial_type_number": True})
+    assert response.status == 400
+    assert "cannot change while the session is running" in response.detail
+
+
+def test_an_arm_time_setting_is_allowed_before_arming(edge: Edge):
+    result = edge.call("Config/PatchConfig", {"extend_trial_type_number": True}).json
+    assert result["changed"] == ["extend_trial_type_number"]
+    state = arm(edge)
+    assert state["config"]["extend_trial_type_number"] is True
+
+
+def test_stop_after_trials_is_cleared_with_a_zero(edge: Edge):
+    edge.call("Config/PatchConfig", {"stop_after_trials": 10})
+    assert edge.call("Config/ReadConfig").json["stop_after_trials"] == 10
+    edge.call("Config/PatchConfig", {"stop_after_trials": 0})
+    # Gone from the wire entirely, which is what "no limit" looks like now: an
+    # absent optional rather than an explicit null.
+    assert "stop_after_trials" not in edge.call("Config/ReadConfig").json
+
+
+def test_the_stop_rule_ends_the_session(edge: Edge):
+    edge.call(
+        "Config/PatchConfig",
+        {"stop_after_trials": 12, "stop_criterion": "TRIAL_COUNT_CRITERION_ALL_TRIALS"},
+    )
+    arm(edge)
+    result = edge.call("Debug/Step", {"trials": 100}).json
+    assert result["stopped"] is True
+    assert result["trials"] == 12
+    assert "12 all trials counted" in result["stop_reason"]
+
+
+def test_an_unknown_config_field_is_refused_by_name(edge: Edge):
+    response = edge.call("Config/PatchConfig", {"rounds_of_applause": 3})
+    assert response.status == 400  # invalid_argument
+    assert "rounds_of_applause" in response.text
+
+
+def test_resetting_counters_clears_the_tallies_but_not_the_bag(edge: Edge):
+    arm(edge)
+    edge.call("Debug/Step", {"trials": 10})
+    before = edge.call("State/ReadState").json
+    state = edge.call("Config/ResetCounters").json
+    assert state["totals"]["total"] == 0
+    assert state["trials_remaining"] == before["trials_remaining"]
+
+
+# -- sets -----------------------------------------------------------------------
+
+
+def test_the_sets_listing_shows_the_chain_and_which_is_active(edge: Edge):
+    body = edge.call("SetStore/ReadSets").json
+    assert [s["name"] for s in body["sets"]] == ["easy", "hard"]
+    assert body["active"] == "easy"
+    assert "chain_problem" not in body
+    assert body["sets"][0]["switch_rule"]["target"] == "hard"
+    assert body["sets"][0]["trials_per_round"] == 4
+
+
+def test_a_broken_switch_chain_is_reported_before_anybody_starts(edge: Edge):
+    body = edge.call(
+        "SetStore/WriteSet",
+        {
+            "name": "hard",
+            "set": {
+                "name": "hard",
+                "trial_types": [{"name": "hard_a", "trials_per_round": 1}],
+                "switch_rule": {
+                    "enabled": True,
+                    "criterion": "TRIAL_COUNT_CRITERION_HITS",
+                    "count": 3,
+                    "target": "gone",
+                },
+            },
+        },
+    ).json
+    assert "not in the store" in body["chain_problem"]
+
+    response = edge.call("Session/Arm")
+    assert response.status == 400
+    assert "unusable" in response.detail
+
+
+def test_a_set_can_be_loaded_by_hand(edge: Edge):
+    arm(edge)
+    state = edge.call("SetStore/LoadSet", {"name": "hard"}).json
+    assert state["set_name"] == "hard"
+    assert [row["name"] for row in state["counters"]] == ["hard_a", "hard_b"]
+    # A set that has just been loaded starts its block from nothing.
+    assert state["set_progress"]["accepted_trials"] == 0
+
+
+def test_the_loaded_set_cannot_be_deleted(edge: Edge):
+    response = edge.call("SetStore/DeleteSet", {"name": "easy"})
+    assert response.status == 412  # failed_precondition
+    assert "load another first" in response.detail
+
+
+def test_a_set_is_replaced_in_place_keeping_its_number(edge: Edge):
+    body = edge.call(
+        "SetStore/WriteSet",
+        {
+            "name": "easy",
+            "set": {
+                "name": "easy",
+                "trial_types": [
+                    {"name": "easy_a", "trials_per_round": 5, "reward_ms": 200},
+                    {"name": "easy_b", "trials_per_round": 1},
+                ],
+                "switch_rule": {"enabled": False},
+            },
+        },
+    ).json
+    easy = next(s for s in body["sets"] if s["name"] == "easy")
+    assert easy["set_number"] == 1
+    assert easy["trials_per_round"] == 6
+
+
+def test_a_graph_name_survives_the_round_trip(edge: Edge):
+    # The graph is named on the wire, never indexed, and the counters table is
+    # where the UI reads it back.
+    arm(edge)
+    edge.call(
+        "SetStore/WriteSet",
+        {
+            "name": "easy",
+            "set": {
+                "name": "easy",
+                "trial_types": [
+                    {
+                        "name": "easy_a",
+                        "trials_per_round": 1,
+                        "statemachine_graph": "detection",
+                    },
+                    {
+                        "name": "easy_b",
+                        "trials_per_round": 1,
+                        "statemachine_graph": "discrimination",
+                    },
+                ],
+                "switch_rule": {"enabled": False},
+            },
+        },
+    )
+    state = edge.call("State/ReadState").json
+    assert [row["statemachine_graph"] for row in state["counters"]] == [
+        "detection",
+        "discrimination",
+    ]
+
+    spec = edge.call("Trial/Next").json
+    assert spec["statemachine_graph"] in {"detection", "discrimination"}
+
+
+def test_the_path_and_the_body_have_to_agree_about_the_name(edge: Edge):
+    response = edge.call(
+        "SetStore/WriteSet", {"name": "easy", "set": {"name": "hard", "trial_types": []}}
+    )
+    assert response.status == 400
+    assert "renaming a set is a delete and a write" in response.detail
+
+
+def test_the_active_set_may_not_be_emptied_mid_session(edge: Edge):
+    arm(edge)
+    response = edge.call(
+        "SetStore/WriteSet",
+        {
+            "name": "easy",
+            "set": {"name": "easy", "trial_types": [{"name": "easy_a", "trials_per_round": 0}]},
+        },
+    )
+    assert response.status == 400
+    assert "a round would be empty" in response.detail
+
+
+# -- policy ---------------------------------------------------------------------
+
+
+GOOD_POLICY = """
+from triald import Policy
+
+
+class AlwaysFirst(Policy):
+    def select_trial(self, state):
+        return 0
+
+    def snapshot(self):
+        return {"level": 3}
+"""
+
+
+def test_a_policy_is_checked_before_it_is_loaded(edge: Edge):
+    result = edge.call(
+        "Policy/CheckPolicy", {"name": "always_first", "source": GOOD_POLICY}
+    ).json
+    assert result["ok"] is True
+    assert result["class_name"] == "AlwaysFirst"
+    assert len(result["sha256"]) == 64
+    assert result["trials_run"] > 0
+
+
+def test_a_syntax_error_comes_back_with_a_line_number(edge: Edge):
+    result = edge.call(
+        "Policy/CheckPolicy", {"name": "broken", "source": "def oops(:\n    pass\n"}
+    ).json
+    assert result["ok"] is False
+    assert result["diagnostics"][0]["line"] == 1
+
+
+def test_a_policy_that_raises_is_reported_rather_than_loaded(edge: Edge):
+    source = "from triald import Policy\n\n\nclass Boom(Policy):\n    def select_trial(self, s):\n        raise RuntimeError('no')\n"
+    check = edge.call("Policy/CheckPolicy", {"name": "boom", "source": source}).json
+    assert check["ok"] is False
+    assert "select_trial" in check["diagnostics"][0]["message"]
+
+    response = edge.call("Policy/LoadPolicy", {"name": "boom", "source": source})
+    assert response.status == 400
+    assert edge.call("Policy/ReadPolicy").json["origin"] == "POLICY_ORIGIN_DEFAULT"
+
+
+def test_a_loaded_policy_drives_the_selection(edge: Edge, service: SessionService, tmp_path):
+    service.policy_dir = tmp_path
+    info = edge.call("Policy/LoadPolicy", {"name": "always_first", "source": GOOD_POLICY}).json
+    assert info["class_name"] == "AlwaysFirst"
+    assert info["origin"] == "POLICY_ORIGIN_UPLOADED"
+    assert info["state"] == {"level": 3}
+
+    arm(edge)
+    result = edge.call("Debug/Step", {"trials": 12}).json
+    counters = result["state"]["counters"]
+    assert counters[0]["total"] == 12
+    assert counters[1]["total"] == 0
+
+
+def test_a_policy_cannot_be_swapped_mid_session(edge: Edge):
+    arm(edge)
+    response = edge.call("Policy/LoadPolicy", {"name": "p", "source": GOOD_POLICY})
+    assert response.status == 412  # failed_precondition
+    assert "stop it before loading" in response.detail
+
+
+# -- the stream -----------------------------------------------------------------
+
+
+def test_the_stream_opens_with_the_current_state_and_pushes_changes(edge: Edge):
+    """The opening frame is what makes the stream usable on its own.
+
+    A panel that subscribed and then waited would show nothing until the rig
+    next did something, which on a rig sitting armed is a long time.
+    """
+    first = edge.stream("State/WatchState", 1)[0]
+    # A oneof rather than a `kind` beside flattened fields: one key names the
+    # arm, and a second kind of frame can be added without every client
+    # learning a new envelope.
+    assert first["sequence"] == "0"
+    assert first["state"]["running"] is False
+
+
+# -- the wire shape -------------------------------------------------------------
+
+
+def test_the_wire_carries_the_whole_trial(service: SessionService):
+    """Everything `trials.jsonl` holds about a trial reaches the wire.
+
+    The two were asserted byte-identical before the interface was generated,
+    because the wire *was* the record model. They are two shapes now — the
+    record keeps `+00:00` and plain integers, the wire is RFC 3339 and strings —
+    so what is checked is that nothing was dropped on the way.
+    """
+    service.arm()
+    service.step(5)
+    record = service.session.state().history[-1]
+
+    from_wire = json.loads(wire.to_json(convert.trial_record_to_wire(record)))
+    from_record = record.as_dict()
+
+    assert from_wire["accepted"] == from_record["accepted"]
+    assert from_wire["outcome"]["code"] == from_record["outcome"]["code"]
+    assert from_wire["outcome"]["name"] == from_record["outcome"]["name"]
+    assert int(from_wire["trial"]["trial_number"]) == from_record["trial"]["trial_number"]
+    assert from_wire["trial"]["trial_type_name"] == from_record["trial"]["trial_type_name"]
+    # The instants are the same moment written two ways.
+    assert dt.datetime.fromisoformat(
+        from_wire["ended_at"].replace("Z", "+00:00")
+    ) == dt.datetime.fromisoformat(from_record["ended_at"])
+
+
+def test_every_ordering_and_criterion_is_in_the_interface(edge: Edge):
+    """The enums the API accepts are the enums the daemon has.
+
+    This read the OpenAPI document, which no longer exists: the interface is
+    `proto/triald/v1/`, and the generated enum descriptors are what a client
+    would generate from. Same check, one description instead of two.
+    """
+    from triald.v1 import common_pb2
+
+    on_the_wire = set(common_pb2.Ordering.keys()) - {"ORDERING_UNSPECIFIED"}
+    assert on_the_wire == {f"ORDERING_{o.name}" for o in Ordering}
+
+    criteria = set(common_pb2.TrialCountCriterion.keys()) - {
+        "TRIAL_COUNT_CRITERION_UNSPECIFIED"
+    }
+    assert criteria == {f"TRIAL_COUNT_CRITERION_{c.name}" for c in TrialCountCriterion}
+
+
+def test_the_web_ui_is_served_from_the_daemon(edge: Edge):
+    page = edge.get("/")
+    assert page.status == 200
+    assert "triald" in page.text
+    assert edge.get("/application_shell.js").status == 200
+    assert edge.get("/triald_user_interface.css").status == 200
+
+
+def test_the_elements_contract_is_served_with_no_cache(edge: Edge):
+    response = edge.get("/elements/triald.js")
+    assert response.status == 200
+    assert response.headers["cache-control"] == "no-cache, must-revalidate"
+    assert "TRIALD_ELEMENT_NAMES" in response.text
+    for tag in ("session", "sets", "counters", "trials", "config", "debug"):
+        assert f'"triald-{tag}"' in response.text
+
+
+def test_an_unknown_path_under_elements_is_refused_not_guessed(edge: Edge):
+    assert edge.get("/elements/does-not-exist.js").status == 404
+    assert edge.get("/../pyproject.toml").status == 404

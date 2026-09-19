@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """One rig's session, and everything the routes are allowed to do to it.
 
-The routes in :mod:`triald.api.app` are deliberately thin - parse, call a method
+The servicers in :mod:`triald.api.servicers` are deliberately thin - convert, call a method
 here, return a model - so that this is the only place that knows the rules about
 *when* something may be done. Two of those rules are worth naming:
 

@@ -19,9 +19,16 @@ dependencies = []
 # The daemon proper. Kept out of the core so the domain logic, the simulator and
 # the policy API can be imported and tested with nothing installed at all.
 serve = [
-    "fastapi>=0.115",
+    # The API is gRPC. `grpc.aio` serves it on the daemon's own port, and
+    # uvicorn serves `api/web_edge.py` — the panels, and the Connect protocol
+    # a browser can speak — beside it.
+    #
+    # **fastapi and pydantic were here and are not.** The interface is
+    # authored in `proto/triald/v1/` and the types are generated from it, so a
+    # web framework's schema generation had nothing left to describe but
+    # itself, and the routes it declared were a second spelling of the rpcs.
+    "grpcio>=1.66",
     "uvicorn[standard]>=0.32",
-    "pydantic>=2.9",
     # The client for whatever runs a trial (api/statemachine_executor.py). Here
     # rather than in the core so that triald.executor -- the contract and the
     # translation of what an executor publishes -- imports nothing at all and is
@@ -31,7 +38,7 @@ serve = [
     # runs from `make proto` and the output is committed, so a checkout needs
     # no compiler (`contracts/DAEMON_LAYOUT.md`).
     #
-    # In `serve` rather than the core deliberately, like fastapi beside it: the
+    # In `serve` rather than the core deliberately, like grpcio beside it: the
     # domain logic, the simulator and the policy API import nothing, and a
     # policy author should not be made to install a protobuf runtime to write
     # one.

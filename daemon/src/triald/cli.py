@@ -371,6 +371,13 @@ async def _serve_both(service, host: str, web_port: int, grpc_port: int) -> None
     from triald.api.grpc_server import build_server, build_servicers
     from triald.api.web_edge import build_edge
 
+    # **The watchdog is the daemon's, not a transport's.** It ends a trial
+    # nobody reported so a dead executor costs one trial rather than the
+    # session — and it used to be started by the web framework's lifespan,
+    # which meant it existed only because something happened to be serving
+    # HTTP. Started here, where the daemon's run loop is.
+    await service.start_watchdog()
+
     servicers = build_servicers(service)
     rpc_server = build_server(service, f"{host}:{grpc_port}")
     edge = uvicorn.Server(

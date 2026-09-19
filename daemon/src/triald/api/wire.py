@@ -60,7 +60,7 @@ def from_json[M: Message](text: str | bytes, message_type: type[M]) -> M:
     rule — a request refuses what it does not understand, a response ignores it
     — and this parses requests.
 
-    Raises `json_format.ParseError`, which `triald.api.app` turns into this
+    Raises `json_format.ParseError`, which `triald.api.web_edge` turns into this
     API's own refusal shape.
     """
     return json_format.Parse(text, message_type(), ignore_unknown_fields=False)

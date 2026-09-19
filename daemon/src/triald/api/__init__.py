@@ -13,14 +13,18 @@ Three things live here, in dependency order:
 * :mod:`triald.api.service` - one rig's session, the thing the routes mutate.
   Owns the store, the config, the live :class:`~triald.session.Session`, the
   simulated subject behind the debug controls, and the list of subscribers.
-* :mod:`triald.api.app` - the FastAPI application and the routes themselves,
-  which are deliberately thin: parse, call the service, convert, answer.
+* :mod:`triald.api.servicers` - the eight services, one module each, and
+  deliberately thin: convert, call the service, convert back.
+* :mod:`triald.api.grpc_server` - those servicers on a gRPC port.
+* :mod:`triald.api.web_edge` - the same servicers behind the Connect protocol,
+  and the panels, for a browser that cannot speak gRPC.
 
-``schemas.py`` used to be the first of these — pydantic models that were the
-contract, with the OpenAPI document generated from them. It is gone. A schema
+Two things used to be here and are gone, for one reason between them.
+``schemas.py`` was pydantic models that were the contract, with an OpenAPI
+document generated from them; ``app.py`` was the FastAPI routes. A description
 generated from the code can only ever restate what the code happens to do,
 which is the second description ``contracts/DAEMON_LAYOUT.md`` exists to
-prevent now that the first one is written by hand.
+prevent now that the first one is written by hand in ``proto/triald/v1/``.
 
 Importing this package needs the ``serve`` extra (``pip install triald[serve]``).
 The domain logic in the rest of ``triald`` needs nothing at all, which is why
@@ -29,25 +33,21 @@ these three modules are off to one side rather than mixed in with it.
 **The names below are resolved lazily, and that is not a micro-optimisation.**
 Not everything under ``api/`` needs the same things: `statemachine_executor`
 speaks HTTP and needs ``httpx``, `stimulus_subscriber` speaks ZeroMQ and needs
-neither FastAPI nor httpx nor anything else at import time. Re-exporting
-`create_app` eagerly would have made *every* module here cost a FastAPI import,
-so a subscriber that was carefully written to need nothing could not be imported
-on a machine without the ``serve`` extra — its own care defeated by a
-neighbour's. PEP 562 keeps the convenient spelling without the coupling.
+neither. Re-exporting the serving layer eagerly would have made *every* module
+here cost a grpcio import, so a subscriber that was carefully written to need
+nothing could not be imported on a machine without the ``serve`` extra — its
+own care defeated by a neighbour's. PEP 562 keeps the convenient spelling
+without the coupling.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-__all__ = ["ServiceError", "SessionService", "create_app"]
+__all__ = ["ServiceError", "SessionService"]
 
 
 def __getattr__(name: str) -> Any:
-    if name == "create_app":
-        from triald.api.app import create_app
-
-        return create_app
     if name in ("ServiceError", "SessionService"):
         from triald.api import service
 

@@ -35,17 +35,15 @@ def main() -> int:
     print(f"  python  {sys.version.split()[0]}")
     print(f"  triald  {getattr(triald, '__version__', 'unversioned')}")
 
-    # Every runtime dependency, imported rather than assumed. `websockets` is
-    # here on purpose: it arrives only through uvicorn's `[standard]` extra.
-    import fastapi
+    # Every runtime dependency, imported rather than assumed.
+    import google.protobuf
+    import grpc
     import httpx  # noqa: F401
-    import pydantic
     import uvicorn
-    import websockets  # noqa: F401
 
     print(
-        f"  fastapi {fastapi.__version__}, uvicorn {uvicorn.__version__}, "
-        f"pydantic {pydantic.VERSION}"
+        f"  grpcio {grpc.__version__}, protobuf {google.protobuf.__version__}, "
+        f"uvicorn {uvicorn.__version__}"
     )
 
     # In the package and deliberately not in `dependencies` -- see RIG_EXTRAS in
@@ -68,43 +66,44 @@ def main() -> int:
 
 
 def the_application_the_unit_would_build() -> None:
-    """The app, built the way `triald serve` builds it, pointed somewhere safe.
+    """The daemon, built the way `triald serve` builds it, pointed somewhere safe.
 
     Temporary directories because this runs as whoever is packaging, and
     /var/lib/braemons is the daemon user's.
     """
-    from triald.api import SessionService, create_app
+    from triald.api import SessionService
+    from triald.api.grpc_server import build_servicers
+    from triald.api.web_edge import rpcs_of
     from triald.cli import demo_experiment
 
     with tempfile.TemporaryDirectory() as scratch:
         here = Path(scratch)
         store, config = demo_experiment()
-        application = create_app(
-            SessionService(
-                store,
-                config,
-                policy_dir=here / "policies",
-                results_dir=here / "sessions",
-            )
+        service = SessionService(
+            store,
+            config,
+            policy_dir=here / "policies",
+            results_dir=here / "sessions",
         )
-        # The OpenAPI schema rather than `app.routes`: routers arrive through
-        # include_router and are not flat there, and this is the same view of
-        # the API a client gets.
-        paths = set(application.openapi()["paths"])
-        expected_paths = (
-            "/api/session/arm",
-            "/api/trial/next",
-            "/api/trial/outcome",
-            "/api/state",
+        # The dispatch table rather than a list of routes: it is built from the
+        # descriptor in the wheel, so this asks whether the *packaged* proto
+        # and the *packaged* servicers still agree — which is the thing that
+        # goes wrong when a build misses a file.
+        addresses = set(rpcs_of(build_servicers(service)))
+        expected = (
+            "/triald.v1.Session/Arm",
+            "/triald.v1.Trial/Next",
+            "/triald.v1.Trial/ReportOutcome",
+            "/triald.v1.State/ReadState",
         )
-        for expected in expected_paths:
-            assert expected in paths, f"{expected} is not a route: {sorted(paths)}"
-        print(f"  {len(paths)} API paths, including the ones the web UI calls")
+        for address in expected:
+            assert address in addresses, f"{address} is not served: {sorted(addresses)}"
+        print(f"  {len(addresses)} rpcs, including the ones the panels call")
 
     # Package data, which has gone missing from a wheel before and is invisible
     # until a browser asks for it.
     web = files("triald") / "web"
-    for asset in ("index.html", "app.js", "style.css"):
+    for asset in ("index.html", "application_shell.js", "triald_user_interface.css"):
         assert (web / asset).is_file(), f"{asset} is not in the package"
     print("  the web UI: shell, script and stylesheet")
 

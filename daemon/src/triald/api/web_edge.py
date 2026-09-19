@@ -310,7 +310,7 @@ _CORS_HEADERS = [
     (b"access-control-allow-origin", b"*"),
     (b"access-control-allow-headers", b"*"),
     (b"access-control-expose-headers", b"*"),
-    (b"cache-control", b"no-store, must-revalidate"),
+    (b"cache-control", b"no-cache, must-revalidate"),
 ]
 
 
