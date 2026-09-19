@@ -9,7 +9,10 @@ from triald.counters import TrialCountCriterion
 from triald.outcomes import AcceptancePolicy
 from triald.selection import Ordering
 from triald.session import SessionConfig
-from triald.v1 import common_pb2, config_pb2
+from triald.v1 import (  # ty: ignore[unresolved-import]  (resolved at runtime by __init__'s __path__)
+    common_pb2,
+    config_pb2,
+)
 
 #: The acceptance flags, in the order the message declares them. Derived from
 #: the message rather than written twice: `tools/check_outcomes.py` already

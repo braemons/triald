@@ -3,11 +3,15 @@
 
 from __future__ import annotations
 
-from google.protobuf.struct_pb2 import Struct
+from google.protobuf.struct_pb2 import (
+    Struct,  # ty: ignore[unresolved-import]  (built at runtime by protobuf's builder)
+)
 
 from triald.counters import TrialCountCriterion
 from triald.trialtypes import SwitchRule, TrialType, TrialTypeSet
-from triald.v1 import sets_pb2
+from triald.v1 import (
+    sets_pb2,  # ty: ignore[unresolved-import]  (resolved at runtime by __init__'s __path__)
+)
 
 from .config import _CRITERIA_TO_WIRE, criterion_from_wire
 

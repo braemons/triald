@@ -6,9 +6,13 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any
 
-from google.protobuf.struct_pb2 import Struct
+from google.protobuf.struct_pb2 import (
+    Struct,  # ty: ignore[unresolved-import]  (built at runtime by protobuf's builder)
+)
 
-from triald.v1 import policy_pb2
+from triald.v1 import (
+    policy_pb2,  # ty: ignore[unresolved-import]  (resolved at runtime by __init__'s __path__)
+)
 
 _ORIGINS = {
     "default": policy_pb2.POLICY_ORIGIN_DEFAULT,

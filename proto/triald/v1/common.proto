@@ -6,8 +6,13 @@ package triald.v1;
 // Why a call was refused.
 //
 // `detail` is meant to be shown to a person: it says what was wrong and, where
-// there is one, what to do instead. The HTTP status carries the category and
-// `error` names the particular case within it.
+// there is one, what to do instead. The gRPC status code carries the category —
+// `failed_precondition`, `invalid_argument`, `not_found` — and `error` names
+// the particular case within it, which is what a client switches on.
+//
+// **A refusal travels as this message**, in the trailing metadata entry
+// `triald-error-bin`, rather than as a sentence for a client to parse. The
+// status message carries `detail` as well, for grpcurl and for logs.
 message Error {
   // A short machine-readable kind, e.g. `session`.
   string error = 1;

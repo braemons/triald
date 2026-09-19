@@ -5,11 +5,15 @@ from __future__ import annotations
 
 import datetime as dt
 
-from google.protobuf.struct_pb2 import Struct
+from google.protobuf.struct_pb2 import (
+    Struct,  # ty: ignore[unresolved-import]  (built at runtime by protobuf's builder)
+)
 
 from triald.outcomes import FrameLoss, Manipulandum, OutcomeReport, TrialOutcome
 from triald.state import TrialRecord, TrialSpec
-from triald.v1 import trial_pb2
+from triald.v1 import (
+    trial_pb2,  # ty: ignore[unresolved-import]  (resolved at runtime by __init__'s __path__)
+)
 
 
 def trial_spec_to_wire(spec: TrialSpec) -> trial_pb2.TrialSpec:

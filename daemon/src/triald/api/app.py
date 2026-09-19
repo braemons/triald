@@ -38,7 +38,7 @@ from triald.api import convert, wire
 from triald.api.service import ServiceError, SessionService, SimSettings
 from triald.session import SessionConfig
 from triald.trialtypes import TrialTypeStore
-from triald.v1 import (
+from triald.v1 import (  # ty: ignore[unresolved-import]  (resolved at runtime by __init__'s __path__)
     common_pb2,
     config_pb2,
     debug_pb2,

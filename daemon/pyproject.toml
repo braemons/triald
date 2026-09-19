@@ -83,6 +83,9 @@ dev = [
     "pytest-cov>=6.0",
     "ruff>=0.8",
     "ty>=0.0.1a1",
+    # protoc and the gRPC stub generator. Development only: the generated code
+    # is committed, so an install needs neither (`contracts/DAEMON_LAYOUT.md`).
+    "grpcio-tools>=1.66",
     # The API tests drive the app through FastAPI's TestClient, which is httpx.
     # The `serve` extra has to be installed for them to run at all; without it
     # tests/test_api.py skips itself.

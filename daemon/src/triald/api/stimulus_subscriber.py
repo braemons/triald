@@ -70,7 +70,10 @@ def connect(host: str, port: int | None = None) -> StimulusSource:
     Imported here rather than at module scope: a triald with no display daemon
     in its rig should not need the client installed to start.
     """
-    from vstimd.events import DEFAULT_EVENT_PORT, EventSubscriber
+    from vstimd.events import (  # ty: ignore[unresolved-import]  (the optional `stimulus` group)
+        DEFAULT_EVENT_PORT,
+        EventSubscriber,
+    )
 
     return EventSubscriber(host, port or DEFAULT_EVENT_PORT, topic=list(TOPICS))
 
@@ -181,7 +184,7 @@ class StimulusObserver:
         # trial nobody was fully watching is a false negative, and a false
         # negative keeps a bad trial in the dataset.
         if getattr(event, "missed_before", 0):
-            self._note_uncertainty(f"{event.missed_before} events missed")  # type: ignore[attr-defined]
+            self._note_uncertainty(f"{event.missed_before} events missed")  # ty: ignore[unresolved-attribute]
 
         if getattr(event, "topic", "") != "frame.dropped":
             return

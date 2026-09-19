@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import dataclasses
 
-from triald.v1 import debug_pb2
+from triald.v1 import (
+    debug_pb2,  # ty: ignore[unresolved-import]  (resolved at runtime by __init__'s __path__)
+)
 
 
 def sim_settings_to_wire(settings) -> debug_pb2.SimSettings:

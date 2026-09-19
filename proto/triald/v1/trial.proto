@@ -22,8 +22,8 @@ message FrameLoss {
 // `contracts/INTERACTIONS.md`, and the three defects recorded there all lived
 // in the gap between this shape and somebody's transcription of it.
 message OutcomeReport {
-  // Which trial this is the outcome of. Refused with 409 if it is not the trial
-  // in flight.
+  // Which trial this is the outcome of. Refused `failed_precondition` if it is
+  // not the trial in flight.
   //
   // **Not part of the outcome: it addresses the message.** The report comes
   // from another machine over a network, and one that arrives late or twice
