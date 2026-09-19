@@ -31,8 +31,8 @@ from collections.abc import Awaitable, Callable
 import grpc
 
 from triald.api.service import ServiceError
-from triald.v1 import (
-    common_pb2,  # ty: ignore[unresolved-import]  (resolved at runtime by __init__'s __path__)
+from triald.v1 import (  # ty: ignore[unresolved-import]  (resolved at runtime by __init__'s __path__)
+    common_pb2,
 )
 
 #: Where the typed refusal rides. `-bin` is gRPC's own spelling for a metadata
@@ -84,22 +84,20 @@ async def answering[T](
         raise  # unreachable: abort() raises. Here so the type is honest.
 
 
-def reject_unknown_fields(message, context_name: str) -> None:
-    """Refuse a request carrying fields this build does not know.
-
-    §11 of `contracts/INTERACTIONS.md`: **a request refuses what it does not
-    understand, a response ignores it.** Over the old JSON mapping the parser
-    did this; binary protobuf instead keeps unknown fields quietly to one side,
-    so the rule has to be asked for. It is worth asking for — a command that
-    does part of what was asked is worse than one that does none, and a client
-    sending a field this daemon has never heard of is a client that believes
-    something is happening.
-    """
-    if message.UnknownFields():
-        numbers = ", ".join(str(field.field_number) for field in message.UnknownFields())
-        raise ServiceError(
-            f"{context_name} carries field(s) {numbers}, which this daemon does not know: "
-            f"it is older than the client that sent them",
-            kind="request",
-            status=422,
-        )
+# **Unknown fields in a request are not refused on the binary wire, and cannot
+# be.** §11 of `contracts/INTERACTIONS.md` asks for it — a request refuses what
+# it does not understand, a response ignores it — and this code tried to
+# provide it with `message.UnknownFields()`. That accessor raises
+# `NotImplementedError` under protobuf's upb runtime, which is the default one
+# everywhere, so the check was a crash rather than a refusal.
+#
+# What is true instead:
+#
+# * **The JSON codec does refuse them**, by name, in `json_format.Parse`. That
+#   is the path a hand-written request arrives on — a panel, a script, a person
+#   with a terminal — and it is where the mistake §11 is about actually gets
+#   made.
+# * **The binary codec ignores them**, because protobuf ignores them. A client
+#   newer than this daemon sends a field this build has never heard of and the
+#   daemon proceeds without it. That is protobuf's design and no daemon in this
+#   family can opt out of it, which is worth knowing rather than papering over.

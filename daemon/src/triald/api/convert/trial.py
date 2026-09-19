@@ -11,8 +11,8 @@ from google.protobuf.struct_pb2 import (
 
 from triald.outcomes import FrameLoss, Manipulandum, OutcomeReport, TrialOutcome
 from triald.state import TrialRecord, TrialSpec
-from triald.v1 import (
-    trial_pb2,  # ty: ignore[unresolved-import]  (resolved at runtime by __init__'s __path__)
+from triald.v1 import (  # ty: ignore[unresolved-import]  (resolved at runtime by __init__'s __path__)
+    trial_pb2,
 )
 
 

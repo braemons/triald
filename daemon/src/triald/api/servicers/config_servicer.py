@@ -8,7 +8,7 @@ import grpc
 from triald.api import convert
 from triald.api.service import ServiceError, SessionService
 from triald.api.servicers import state_message
-from triald.api.servicers.refusals import answering, reject_unknown_fields
+from triald.api.servicers.refusals import answering
 from triald.v1 import (  # ty: ignore[unresolved-import]  (resolved at runtime by __init__'s __path__)
     config_pb2,
     service_pb2_grpc,
@@ -33,7 +33,6 @@ class ConfigServicer(service_pb2_grpc.ConfigServicer):
         """
 
         async def run():
-            reject_unknown_fields(request, "the config patch")
             try:
                 changes = convert.config_patch_from_wire(request)
             except convert.config.Refused as problem:

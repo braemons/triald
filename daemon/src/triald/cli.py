@@ -19,6 +19,8 @@ extra, which the rest of this module deliberately does not.
 from __future__ import annotations
 
 import argparse
+import asyncio
+import importlib.util
 import json
 import logging
 import random
@@ -287,17 +289,19 @@ def _cmd_replay(args: argparse.Namespace) -> int:
 
 def _cmd_serve(args: argparse.Namespace) -> int:
     """Bring up the daemon: the API, and the web UI written against it."""
-    try:
-        import uvicorn
-
-        from triald.api import SessionService, create_app
-    except ImportError:
+    # An availability probe, not an import: what is actually needed is imported
+    # in `_serve_both`, and importing it twice only to check would run the
+    # module twice.
+    if not all(importlib.util.find_spec(name) for name in ("uvicorn", "grpc")):
         print(
             "error: 'triald serve' needs the serve extra - install it with\n"
             "  uv sync --extra serve      (or: pip install 'triald[serve]')",
             file=sys.stderr,
         )
         return 1
+
+    from triald.api import SessionService
+    from triald.api.grpc_server import grpc_port_for
 
     try:
         rig = RigConfiguration.load_from_toml_file(
@@ -332,23 +336,60 @@ def _cmd_serve(args: argparse.Namespace) -> int:
             print(f"error: {exc}", file=sys.stderr)
             return 1
 
-    app = create_app(
-        SessionService(
-            store,
-            config,
-            policy=policy,
-            policy_dir=policy_dir,
-            results_dir=results_dir,
-        )
+    service = SessionService(
+        store,
+        config,
+        policy=policy,
+        policy_dir=policy_dir,
+        results_dir=results_dir,
     )
     if rig.source is not None:
         print(f"rig config: {rig.source}")
     if results_dir is None:
         print("note: no results directory, so nothing will be written to disk")
 
-    print(f"triald on http://{host}:{port}  (API docs at /docs)")
-    uvicorn.run(app, host=host, port=port, log_level="info")
+    grpc_port = grpc_port_for(port)
+    print(f"triald: panels on http://{host}:{port}/, gRPC on {host}:{grpc_port}")
+    asyncio.run(_serve_both(service, host, port, grpc_port))
     return 0
+
+
+async def _serve_both(service, host: str, web_port: int, grpc_port: int) -> None:
+    """The two listeners, on one loop, in one process.
+
+    They are two because a Python daemon cannot be one: `grpc.aio` owns a
+    socket outright and no ASGI server speaks native gRPC. They share the
+    servicers, so an rpc answers identically whichever way it was reached, and
+    they share the event loop, so the session they both talk to is never two
+    sessions.
+
+    Ctrl-C stops the gRPC server gracefully — a stream in flight gets to end —
+    and uvicorn handles its own signals.
+    """
+    import uvicorn
+
+    from triald.api.grpc_server import build_server, build_servicers
+    from triald.api.web_edge import build_edge
+
+    servicers = build_servicers(service)
+    rpc_server = build_server(service, f"{host}:{grpc_port}")
+    edge = uvicorn.Server(
+        uvicorn.Config(
+            build_edge(service, servicers),
+            host=host,
+            port=web_port,
+            log_level="info",
+            # The panels open a stream and hold it open; the default would cut
+            # one off as though the daemon had gone away.
+            timeout_keep_alive=3600,
+        )
+    )
+
+    await rpc_server.start()
+    try:
+        await edge.serve()
+    finally:
+        await rpc_server.stop(grace=1.0)
 
 
 # -- a small experiment to try things against ------------------------------------

@@ -8,8 +8,8 @@ from typing import Any
 from triald.counters import ResultCount
 from triald.state import SessionState, SetProgress
 from triald.trialtypes import TrialTypeSet
-from triald.v1 import (
-    session_pb2,  # ty: ignore[unresolved-import]  (resolved at runtime by __init__'s __path__)
+from triald.v1 import (  # ty: ignore[unresolved-import]  (resolved at runtime by __init__'s __path__)
+    session_pb2,
 )
 
 from .config import _CRITERIA_TO_WIRE, session_config_to_wire

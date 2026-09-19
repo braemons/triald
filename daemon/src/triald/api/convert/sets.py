@@ -9,8 +9,8 @@ from google.protobuf.struct_pb2 import (
 
 from triald.counters import TrialCountCriterion
 from triald.trialtypes import SwitchRule, TrialType, TrialTypeSet
-from triald.v1 import (
-    sets_pb2,  # ty: ignore[unresolved-import]  (resolved at runtime by __init__'s __path__)
+from triald.v1 import (  # ty: ignore[unresolved-import]  (resolved at runtime by __init__'s __path__)
+    sets_pb2,
 )
 
 from .config import _CRITERIA_TO_WIRE, criterion_from_wire

@@ -7,7 +7,7 @@ import grpc
 
 from triald.api import convert
 from triald.api.service import SessionService
-from triald.api.servicers.refusals import answering, reject_unknown_fields
+from triald.api.servicers.refusals import answering
 from triald.v1 import (  # ty: ignore[unresolved-import]  (resolved at runtime by __init__'s __path__)
     policy_pb2,
     service_pb2_grpc,
@@ -35,7 +35,6 @@ class PolicyServicer(service_pb2_grpc.PolicyServicer):
         """
 
         async def run():
-            reject_unknown_fields(request, "the policy")
             return convert.policy_check_to_wire(
                 self.service.check_policy(request.name, request.source)
             )
@@ -49,7 +48,6 @@ class PolicyServicer(service_pb2_grpc.PolicyServicer):
         """
 
         async def run():
-            reject_unknown_fields(request, "the policy")
             async with self.service.publishing():
                 info = self.service.load_policy_source(request.name, request.source)
             return convert.policy_info_to_wire(info)

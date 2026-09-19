@@ -32,24 +32,61 @@ from triald.api.servicers import (
 
 log = logging.getLogger(__name__)
 
-#: Every service, in the order `service.proto` declares them. A new service is
-#: a line here, and `tests/test_every_rpc_is_implemented.py` fails until it is.
-REGISTRARS = (
-    state_servicer.register,
-    session_servicer.register,
-    trial_servicer.register,
-    set_store_servicer.register,
-    config_servicer.register,
-    policy_servicer.register,
-    events_servicer.register,
-    debug_servicer.register,
-)
+#: Every service, by the name `service.proto` gives it. A new service is a line
+#: here, and `tests/test_every_rpc_is_implemented.py` fails until it is.
+SERVICER_CLASSES = {
+    "State": state_servicer.StateServicer,
+    "Session": session_servicer.SessionServicer,
+    "Trial": trial_servicer.TrialServicer,
+    "SetStore": set_store_servicer.SetStoreServicer,
+    "Config": config_servicer.ConfigServicer,
+    "Policy": policy_servicer.PolicyServicer,
+    "Events": events_servicer.EventsServicer,
+    "Debug": debug_servicer.DebugServicer,
+}
+
+#: How each one is put on a gRPC server. Generated code, one function per
+#: service, and the only thing that knows grpc's registration shape.
+REGISTRARS = {
+    "State": state_servicer.register,
+    "Session": session_servicer.register,
+    "Trial": trial_servicer.register,
+    "SetStore": set_store_servicer.register,
+    "Config": config_servicer.register,
+    "Policy": policy_servicer.register,
+    "Events": events_servicer.register,
+    "Debug": debug_servicer.register,
+}
+
+
+def build_servicers(service: SessionService) -> dict[str, object]:
+    """One instance of each service, for whichever transports are serving.
+
+    **Built once and shared.** The gRPC port and the browser edge dispatch into
+    the same objects, so an rpc cannot behave differently depending on which
+    way a caller reached it — which is the failure mode of having two
+    transports at all.
+    """
+    return {name: cls(service) for name, cls in SERVICER_CLASSES.items()}
 
 
 def build_server(service: SessionService, address: str) -> grpc.aio.Server:
     """A server with every service on it, bound and not yet started."""
     server = grpc.aio.server()
-    for register in REGISTRARS:
+    for register in REGISTRARS.values():
         register(service, server)
     server.add_insecure_port(address)
     return server
+
+
+#: The gRPC port, from the port a browser is pointed at.
+#:
+#: **Two listeners, one number to configure.** `port` stays what it has always
+#: been — where the panels and the `/elements/` contract live, which is what a
+#: console's `rigs.json` holds and what a person types into a browser — and
+#: gRPC goes one above it. A Python daemon cannot serve both on one socket the
+#: way a Rust one can: `grpc.aio` owns its port outright, and no ASGI server
+#: speaks native gRPC. This is where that difference surfaces, and it surfaces
+#: as a `+ 1` rather than as a second setting nobody remembers to change.
+def grpc_port_for(web_port: int) -> int:
+    return web_port + 1

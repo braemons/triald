@@ -15,36 +15,11 @@ import pytest
 from triald.v1 import service_pb2, service_pb2_grpc
 
 from triald.api import grpc_server
-from triald.api.servicers import (
-    config_servicer,
-    debug_servicer,
-    events_servicer,
-    policy_servicer,
-    session_servicer,
-    set_store_servicer,
-    state_servicer,
-    trial_servicer,
-)
 
-#: Which class implements which service. The one hand-written list in this
-#: file, and the only thing a new service has to be added to.
-IMPLEMENTATIONS = {
-    "State": state_servicer.StateServicer,
-    "Session": session_servicer.SessionServicer,
-    "Trial": trial_servicer.TrialServicer,
-    "SetStore": set_store_servicer.SetStoreServicer,
-    "Config": config_servicer.ConfigServicer,
-    "Policy": policy_servicer.PolicyServicer,
-    "Events": events_servicer.EventsServicer,
-    "Debug": debug_servicer.DebugServicer,
-}
-
-
-def services_in_the_proto():
-    return [
-        service_pb2.DESCRIPTOR.services_by_name[name]
-        for name in service_pb2.DESCRIPTOR.services_by_name
-    ]
+#: Which class implements which service — read from the daemon rather than
+#: restated here, so this test cannot pass by agreeing with a copy of the list
+#: it is supposed to be checking.
+IMPLEMENTATIONS = grpc_server.SERVICER_CLASSES
 
 
 def test_every_service_in_the_proto_has_an_implementation():
@@ -60,7 +35,7 @@ def test_every_service_is_registered_on_the_server():
     A servicer nobody registers is a class that imports cleanly and answers
     nothing, which is the failure this catches.
     """
-    assert len(grpc_server.REGISTRARS) == len(IMPLEMENTATIONS)
+    assert set(grpc_server.REGISTRARS) == set(IMPLEMENTATIONS)
 
 
 @pytest.mark.parametrize("service_name", sorted(IMPLEMENTATIONS))
@@ -85,3 +60,27 @@ def test_every_rpc_has_a_body_of_its_own(service_name: str):
         f"{implementation.__name__} inherits {missing} from the generated base, "
         f"so those rpcs answer UNIMPLEMENTED at runtime"
     )
+
+
+def test_the_browser_edge_reaches_every_rpc_too():
+    """Two transports, one implementation — and both able to reach all of it.
+
+    The edge builds its dispatch table from the same descriptor, so this is
+    really asking whether anything about a method's shape stops it being
+    addressable over HTTP. An rpc the panels cannot call is an rpc a panel
+    author will reimplement badly somewhere else.
+    """
+    from triald.api.web_edge import rpcs_of
+
+    # `rpcs_of` only reads the handlers off each servicer, so instances with
+    # no session behind them are enough to ask what is addressable.
+    servicers = {name: cls.__new__(cls) for name, cls in IMPLEMENTATIONS.items()}
+    table = rpcs_of(servicers)
+
+    expected = {
+        f"/{descriptor.full_name}/{method.name}"
+        for descriptor in service_pb2.DESCRIPTOR.services_by_name.values()
+        for method in descriptor.methods
+    }
+    assert set(table) == expected
+    assert len(expected) == 29, "the proto declares 29 rpcs; this is a count of them"

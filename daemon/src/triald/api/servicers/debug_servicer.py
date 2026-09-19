@@ -14,7 +14,7 @@ import grpc
 from triald.api import convert
 from triald.api.service import SessionService, SimSettings
 from triald.api.servicers import state_message
-from triald.api.servicers.refusals import answering, reject_unknown_fields
+from triald.api.servicers.refusals import answering
 from triald.v1 import (  # ty: ignore[unresolved-import]  (resolved at runtime by __init__'s __path__)
     debug_pb2,
     service_pb2_grpc,
@@ -32,7 +32,6 @@ class DebugServicer(service_pb2_grpc.DebugServicer):
         """Retune the simulated subject. The RNG keeps its place."""
 
         async def run():
-            reject_unknown_fields(request, "the simulator settings")
             async with self.service.publishing():
                 self.service.set_sim(convert.sim_settings_from_wire(request, SimSettings))
             return convert.sim_settings_to_wire(self.service.sim)
@@ -43,7 +42,6 @@ class DebugServicer(service_pb2_grpc.DebugServicer):
         """Run whole simulated trials through the real loop, and answer with the state."""
 
         async def run():
-            reject_unknown_fields(request, "the step request")
             async with self.service.publishing():
                 ran = self.service.step(request.trials)
             result = debug_pb2.StepResult(
@@ -67,7 +65,6 @@ class DebugServicer(service_pb2_grpc.DebugServicer):
         """Step the simulator on a timer until it is stopped or the session ends."""
 
         async def run():
-            reject_unknown_fields(request, "the free-run request")
             status = await self.service.set_free_run(request.running, request.interval_ms)
             await self.service.publish()
             return convert.free_run_to_wire(status)

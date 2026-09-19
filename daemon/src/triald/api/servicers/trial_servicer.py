@@ -12,7 +12,7 @@ import grpc
 
 from triald.api import convert
 from triald.api.service import ServiceError, SessionService
-from triald.api.servicers.refusals import answering, reject_unknown_fields
+from triald.api.servicers.refusals import answering
 from triald.v1 import (  # ty: ignore[unresolved-import]  (resolved at runtime by __init__'s __path__)
     service_pb2_grpc,
     trial_pb2,
@@ -45,7 +45,6 @@ class TrialServicer(service_pb2_grpc.TrialServicer):
         """
 
         async def run():
-            reject_unknown_fields(request, "the outcome report")
             if not request.HasField("trial_id"):
                 # `optional` although it is required: proto3 has no required
                 # fields and a plain int64 cannot tell "trial 0" from "no trial
@@ -74,7 +73,6 @@ class TrialServicer(service_pb2_grpc.TrialServicer):
         """
 
         async def run():
-            reject_unknown_fields(request, "the cancellation")
             async with self.service.publishing():
                 return convert.trial_record_to_wire(self.service.cancel_trial(request.reason))
 

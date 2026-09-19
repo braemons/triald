@@ -8,7 +8,7 @@ import grpc
 from triald.api import convert
 from triald.api.service import ServiceError, SessionService
 from triald.api.servicers import state_message
-from triald.api.servicers.refusals import answering, reject_unknown_fields
+from triald.api.servicers.refusals import answering
 from triald.v1 import (  # ty: ignore[unresolved-import]  (resolved at runtime by __init__'s __path__)
     service_pb2_grpc,
     session_pb2,
@@ -34,7 +34,6 @@ class SetStoreServicer(service_pb2_grpc.SetStoreServicer):
         """Add or replace a set, with its trial types and its switch rule."""
 
         async def run():
-            reject_unknown_fields(request, "the set")
             if request.set.name != request.name:
                 # The request names the set twice, and they have to agree:
                 # renaming is a delete and a write, because a rename that
