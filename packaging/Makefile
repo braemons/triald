@@ -195,7 +195,18 @@ wheel: $(SRC)/daemon/pyproject.toml  ## the wheel and the sdist, stamped, into d
 # from the sdist and an sdist cannot hold a path above its own root; the wheel
 # then fails on a machine that never saw the repository. A copy into the staged
 # tree has no such cleverness in it.
-$(SRC)/daemon/pyproject.toml: $(shell find $(ROOT)/daemon/src $(ROOT)/client -type f) $(ROOT)/daemon/pyproject.toml
+#
+# The prerequisite list is the daemon's source and the *panels* — not all of
+# `client/`. `client/web/node_modules` is tens of thousands of files and
+# `client/python/.venv` is another interpreter; a `find` across both would be
+# slow every time and would rebuild the stage whenever somebody ran `npm ci`.
+# `client/python` is not in the prerequisites at all because it is not in the
+# wheel: the client is its own distribution, and talking to a rig should not
+# mean installing one.
+$(SRC)/daemon/pyproject.toml: $(shell find $(ROOT)/daemon/src -type f) \
+                              $(shell find $(ROOT)/client/web -type f \
+                                        -not -path '*/node_modules/*' -not -path '*/gen/*') \
+                              $(ROOT)/daemon/pyproject.toml
 	rm -rf $(SRC)
 	@mkdir -p $(SRC)
 	cp -a $(ROOT)/daemon $(SRC)/

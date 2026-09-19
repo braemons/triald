@@ -30,3 +30,8 @@ htmlcov/
 /client/web/node_modules/
 /client/web/gen/
 /build/web-check.js
+
+# The Python client is its own uv project beside the daemon's.
+/client/python/.venv/
+/client/python/dist/
+/client/python/build/

@@ -602,7 +602,13 @@ class SessionService:
         session = self.require_running()
         try:
             session.load_set(name)
-        except (KeyError, SessionError) as exc:
+        except KeyError as exc:
+            # Its own arm: a set that is not there is `not_found`, the same as
+            # deleting one that is not there. Folded in with SessionError it
+            # answered `invalid_argument`, which says the request was wrong
+            # rather than that the thing it named does not exist.
+            raise ServiceError(str(exc), kind="sets", refusal=Refusal.NO_SUCH_THING) from exc
+        except SessionError as exc:
             raise ServiceError(str(exc), kind="sets", refusal=Refusal.BAD_REQUEST) from exc
 
     # -- config -----------------------------------------------------------------

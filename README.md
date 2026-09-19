@@ -122,6 +122,9 @@ and sink operators map onto the state stream directly).
   every rpc, with what each one refuses and why, authored by hand.
 - [`docs/reference/api.md`](docs/reference/api.md) — the API for a person: what
   an rpc is for, when to use one rather than another, and what a refusal means.
+- [`client/python/`](client/python/) — the Python client and `trialctl`. Two
+  runtime dependencies, and not the daemon: talking to a rig should not mean
+  installing one.
 - [`dev/PLAN.md`](dev/PLAN.md) — the functional scope: what came from
   `TrialTypeManager`, what is new, what is deliberately out, and the open
   questions.

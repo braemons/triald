@@ -8,7 +8,7 @@
 # it is not.
 
 .PHONY: help sync test lint fmt typecheck check sim clean version \
-        proto check-proto web check-web deb wheel packages package-check
+        proto check-proto web check-web client deb wheel packages package-check
 
 help:
 	@echo "make sync       install the dev environment"
@@ -21,6 +21,7 @@ help:
 	@echo "make check-proto  the proto compiles, is current, and matches the taxonomy"
 	@echo "make web        regenerate client/web/elements/daemon_api_client.js from proto/"
 	@echo "make check-web  the committed browser client is what proto/ produces"
+	@echo "make client     the Python client's own checks (its own project)"
 	@echo "make sim        run a simulated session"
 	@echo "make version    the version the git tag implies"
 	@echo ""
@@ -120,10 +121,17 @@ check-web: ## fail if the committed browser client is not what proto/ produces
 	}
 	@rm -f build/web-check.js
 
+# The Python client is its own project with its own Makefile, and is not part
+# of `check` for the same reason `check-web` is not: it needs a network the
+# first time. Its own `check` regenerates its stubs from proto/, lints,
+# typechecks and runs both suites — the second of which starts this daemon.
+client: ## the Python client's checks: its stubs, ruff, ty, and both suites
+	@$(MAKE) --no-print-directory -C client/python check
+
 # What CI runs. The simulated session is the end-to-end smoke test.
 #
-# Not check-web: it needs npm and, the first time, a network — and this target
-# has to work on a rig. CI runs `make check-web` as its own step.
+# Not check-web and not client: both need a network the first time, and this
+# target has to work on a rig. CI runs each as its own step.
 check: lint typecheck test check-proto
 	uv run --directory daemon triald sim --trials 200
 	uv run --directory daemon triald policy check ../examples/staircase.py --trial-types contrast_0,contrast_1,contrast_2,contrast_3,contrast_4,contrast_5
