@@ -162,7 +162,7 @@ class SessionService:
 
     Holds the trial type store, the session config, the live
     :class:`~triald.session.Session`, the simulated subject the debug controls
-    drive, the loaded policy, and the WebSocket subscribers.
+    drive, the loaded policy, and whoever is following the state stream.
     """
 
     def __init__(

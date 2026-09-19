@@ -29,24 +29,7 @@ export class TrialsPanelElement extends BasePanelElement {
   }
 
   async start() {
-    this.openStateStream();
-  }
-
-  openStateStream() {
-    const socket = this.trackSocket(this.api.openStateStream());
-    socket.addEventListener("message", (event) => {
-      const message = JSON.parse(event.data);
-      this.state = message.state ?? message;
-      this.paint();
-    });
-    socket.addEventListener("close", () => {
-      if (this.isConnected && this.openSockets.includes(socket)) {
-        this.openSockets = this.openSockets.filter((each) => each !== socket);
-        setTimeout(() => {
-          if (this.isConnected) this.openStateStream();
-        }, 1000);
-      }
-    });
+    this.followStateStream(() => this.paint());
   }
 
   paint() {

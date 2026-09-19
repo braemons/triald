@@ -82,27 +82,10 @@ export class DebugPanelElement extends BasePanelElement {
       this.sim = await this.api.readSim();
       this.paintSim();
     });
-    this.openStateStream();
+    this.followStateStream(() => this.paintManual());
     this.pollEvery(2, async () => {
       this.freeRun = await this.api.readFreeRun();
       this.paintStep();
-    });
-  }
-
-  openStateStream() {
-    const socket = this.trackSocket(this.api.openStateStream());
-    socket.addEventListener("message", (event) => {
-      const message = JSON.parse(event.data);
-      this.state = message.state ?? message;
-      this.paintManual();
-    });
-    socket.addEventListener("close", () => {
-      if (this.isConnected && this.openSockets.includes(socket)) {
-        this.openSockets = this.openSockets.filter((each) => each !== socket);
-        setTimeout(() => {
-          if (this.isConnected) this.openStateStream();
-        }, 1000);
-      }
     });
   }
 

@@ -93,9 +93,9 @@ dev = [
     # protoc and the gRPC stub generator. Development only: the generated code
     # is committed, so an install needs neither (`contracts/DAEMON_LAYOUT.md`).
     "grpcio-tools>=1.66",
-    # The API tests drive the app through FastAPI's TestClient, which is httpx.
-    # The `serve` extra has to be installed for them to run at all; without it
-    # tests/test_api.py skips itself.
+    # The three-daemon end-to-end test talks to statemachined and vstimd over
+    # the network. The browser edge's own tests need no client at all: they
+    # drive the ASGI app directly (tests/test_the_browser_edge.py).
     "httpx>=0.28",
 ]
 
@@ -117,9 +117,9 @@ packages = ["src/triald"]
 # fails on a machine that never saw the repository.
 #
 # So `packaging/Makefile` copies `client/web` into the staged package before
-# building, and `api/app.py` falls back to the authored location when no copy
-# has been made — which is every editable install, and therefore every
-# developer. Build with `make wheel`, not `uv build`.
+# building, and `find_web_root` in `api/web_edge.py` falls back to the authored
+# location when no copy has been made — which is every editable install, and
+# therefore every developer. Build with `make wheel`, not `uv build`.
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

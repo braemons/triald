@@ -130,15 +130,19 @@ reaching for anything else.
   shows both what was believed and when it changed. Custom payloads are checked
   strictly (no `default=str`): stringifying a `set` into `"{1, 2, 3}"` is silent
   corruption of something nobody re-checks for years.
-- **The wire schema is the contract, not the Python API.** `api/schemas.py` is
-  what the UI and the clients are written against. A `TrialRecordModel`
-  serialises byte-for-byte to the `trials.jsonl` line, and a test asserts it, so
-  the record format and the API cannot drift. That is why the timestamp fields
-  carry a serialiser: pydantic spells UTC `Z` and `datetime.isoformat()` spells
-  it `+00:00`, and the record has years of files behind it.
-- **The web UI has no build step, no framework and no CDN.** A rig box may have
-  no route to the internet. Three files in `web/`, served by the daemon.
-- **The debug controls are not a second code path.** `/api/debug/step` goes
+- **The proto is the contract, not the Python API.** `proto/triald/v1/` is what
+  the UI and the clients are written against. A `TrialRecord` serialises
+  byte-for-byte to the `trials.jsonl` line, and a test asserts it, so the record
+  format and the API cannot drift. Every field pins `json_name` to its
+  snake_case spelling for the same reason: `trial_number` is `trial_number` in
+  the proto, on the wire, in the record on disk and in both clients.
+- **The web UI has no framework and no CDN.** A rig box may have no route to the
+  internet, so nothing is fetched at runtime. It *does* have a build step, and
+  exactly one: `client/web/elements/daemon_api_client.js` is generated from
+  `proto/` by `make web` and **committed**, so a checkout still runs with uv
+  alone. The panels beside it stay hand-written ES modules, served as
+  themselves.
+- **The debug controls are not a second code path.** `Debug.Step` goes
   through `runner.run_trial`, the same four calls a rig makes, with
   `SimulatedBehaviourSource` in place of the microcontroller. A simulator that
   had its own loop would stop testing the real one.
@@ -165,31 +169,38 @@ Roughly in dependency order — nothing later is imported by anything earlier.
 | `recording.py` | The session directory: manifest, trials, events, summary |
 | `runner.py` | Drives a session against a behaviour source |
 | `cli.py` | `triald sim`, `triald policy check`, `triald replay`, `triald serve` |
-| `api/schemas.py` | The wire contract: Pydantic models for everything crossing the API |
+| `api/wire.py`, `api/convert/` | protobuf's JSON mapping, and the seam between wire types and this daemon's own |
 | `api/service.py` | One rig's session — the rules about *when* something may be done |
-| `api/app.py` | FastAPI routes, deliberately thin, plus the static UI mount |
-| `web/` | The session view: `index.html`, `app.js`, `style.css`. No build step |
+| `api/servicers/` | One module per service in `proto/triald/v1/service.proto` |
+| `api/grpc_server.py` | The daemon's own port: `grpc.aio`, for clients and CLIs |
+| `api/web_edge.py` | The browser's way in: the Connect protocol, and the panels |
+| `client/web/` | The panels. A sibling of `daemon/`, with a build step whose output is committed |
 
-`api/` and `web/` need the `serve` extra; everything above them imports nothing
-at all, which is why they are a subpackage rather than mixed in. The API is
-specified in `dev/API.md`.
+`api/` needs the `serve` extra; everything above it imports nothing at all,
+which is why it is a subpackage rather than mixed in. **The API is
+`proto/triald/v1/` — types and behaviours both, authored by hand.**
 
 Not built yet: `client/{python,matlab,bonsai}`, the `Environment` and `Records`
 API groups, the CodeMirror policy editor and the configurable uPlot performance
 charts. All specified in `dev/PLAN.md`.
 
-**No protobuf and no ZeroMQ**, unlike vstimd. Its wire efficiency buys nothing
-against ~1 KB once per trial, and MATLAB's protobuf support is poor enough that
-one of the three clients was going over HTTP/JSON regardless — leaving a `protoc`
-step in every client build and a protocol nobody can `curl`. Two daemons speaking
-different protocols is a knowing trade, not an oversight.
+**protobuf and gRPC**, like every daemon in the family. This file used to argue
+the opposite — that ~1 KB once per trial does not need wire efficiency, and that
+a protocol nobody can `curl` costs more than it buys. Both halves turned out to
+be answering the wrong question. The interface is not a transport: it is the one
+written-down description of what this daemon accepts and what it answers, and
+`proto/triald/v1/` is a description that generates every client instead of being
+restated in each one. There is no `curl` half any more, and none is wanted —
+there are clients and CLIs, and a browser reaches the same rpcs over Connect.
 
-**The schema comes before the clients.** `api/schemas.py` covers the wire and the
-record shape, with OpenAPI generated from it. The clients and the web UI are
-written against that, never against `triald.Session`. Still outstanding: the
-config-file shapes, and retiring `state.py`'s hand-written `as_dict()` methods in
-favour of the models — a real refactor of working, tested code, and the drift
-test is what holds the two together until it happens.
+**The interface comes before the clients.** `proto/triald/v1/` carries the types
+*and* the behaviours: what each rpc refuses, and with which code. `api/convert/`
+is the seam — wire types on one side, this daemon's own on the other — and
+nothing below `api/` knows protobuf exists. The clients and the web UI are
+generated from the proto and written against it, never against `triald.Session`.
+Still outstanding: the config-file shapes, and retiring `state.py`'s hand-written
+`as_dict()` methods — a real refactor of working, tested code, and the drift test
+is what holds the two together until it happens.
 
 ## Testing
 

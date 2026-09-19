@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The HTTP and WebSocket face of the daemon.
+"""The gRPC face of the daemon, and the browser edge beside it.
 
 Three things live here, in dependency order:
 

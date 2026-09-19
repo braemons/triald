@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // What every panel has in common: a shadow root, a `base` attribute, a way to
-// poll without leaking a timer, and one honest place for a refusal to land.
+// poll or follow a stream without leaking either, and one honest place for a
+// refusal to land.
 //
 // Copied in shape from statemachined's `base_panel_element.js` -- the two
 // daemons are unrelated code, and the `/elements/` contract is what a console
@@ -28,12 +29,24 @@ export class BasePanelElement extends HTMLElement {
     this.root = this.attachShadow({ mode: "open" });
     adoptSharedStyles(this.root);
     this.pollTimers = [];
-    this.openSockets = [];
+    this.openStreams = [];
+    this.reconnectTimers = [];
     this.failure = null;
   }
 
+  /// The client for this panel's `base`, built once.
+  ///
+  /// Cached on the element rather than made per call: a client holds the
+  /// Connect transport and the eight service clients, and a panel that polls
+  /// once a second would otherwise build them all once a second. Keyed by
+  /// `base` so that moving a panel to another rig rebuilds it.
   get api() {
-    return new DaemonApiClient(this.getAttribute("base") || "");
+    const base = this.getAttribute("base") || "";
+    if (this.cachedApi === undefined || this.cachedApiBase !== base) {
+      this.cachedApi = new DaemonApiClient(base);
+      this.cachedApiBase = base;
+    }
+    return this.cachedApi;
   }
 
   connectedCallback() {
@@ -45,7 +58,7 @@ export class BasePanelElement extends HTMLElement {
   disconnectedCallback() {
     // A panel removed from the DOM must stop talking to the rig. Not tidiness:
     // a console that swaps panels on every nav click would otherwise
-    // accumulate pollers against triald.
+    // accumulate pollers and streams against triald.
     this.stop();
   }
 
@@ -153,15 +166,14 @@ export class BasePanelElement extends HTMLElement {
 
   stop() {
     for (const timer of this.pollTimers) clearInterval(timer);
+    for (const timer of this.reconnectTimers) clearTimeout(timer);
     this.pollTimers = [];
-    for (const socket of this.openSockets) {
-      try {
-        socket.close();
-      } catch {
-        /* already closing */
-      }
-    }
-    this.openSockets = [];
+    this.reconnectTimers = [];
+    // Aborting is how a Connect stream ends from this side. The follower
+    // checks its own signal before treating the resulting throw as a failure,
+    // so this close raises no banner and schedules no retry.
+    for (const stream of this.openStreams) stream.abort();
+    this.openStreams = [];
     this.stopped();
   }
 
@@ -185,6 +197,26 @@ export class BasePanelElement extends HTMLElement {
     return once;
   }
 
+  /// Follow `State.WatchState`, putting each frame on `this.state` and asking
+  /// the panel to repaint.
+  ///
+  /// Here rather than in four panels: every one of them wants the same thing,
+  /// and the frame-versus-state unwrapping below is the kind of detail that
+  /// gets fixed in three copies out of four.
+  followStateStream(repaint) {
+    this.followStream((options) => this.api.followState(options), {
+      onMessage: (frame) => {
+        // The frame is an envelope with a `oneof` in it, and `state` is the
+        // only arm there is today. A panel that painted whatever arrived would
+        // break on the first frame carrying something else -- which is exactly
+        // what the envelope exists to make possible.
+        if (frame.state === undefined) return;
+        this.state = frame.state;
+        repaint();
+      },
+    });
+  }
+
   /// Run one action, showing whatever it refuses with.
   async attempt(action) {
     try {
@@ -197,9 +229,47 @@ export class BasePanelElement extends HTMLElement {
     }
   }
 
-  trackSocket(socket) {
-    this.openSockets.push(socket);
-    return socket;
+  /// Follow a server-streaming rpc, reconnecting until this panel is taken off
+  /// the page.
+  ///
+  /// `open` is given the call options and returns the stream --
+  /// `(options) => this.api.followState(options)`. The panel names the rpc;
+  /// this holds the retry, the abort and the two callbacks, and `onOpen` fires
+  /// when the daemon accepted the call rather than when a frame arrives: a
+  /// session sitting between trials produces no frames and is not broken.
+  ///
+  /// A console is left open across the thing it is watching -- a rig restarted
+  /// between blocks, a daemon upgraded, a cable. A panel that needs a page
+  /// reload to notice its daemon came back is a panel somebody stops trusting.
+  /// Backoff caps at ten seconds, so a rig that was off all night is picked up
+  /// within ten seconds of coming up rather than hammered all night.
+  followStream(open, { onMessage, onOpen, onClose } = {}) {
+    let attempt = 0;
+    const follow = async () => {
+      const stream = new AbortController();
+      this.openStreams.push(stream);
+      try {
+        const frames = open({
+          signal: stream.signal,
+          onHeader: () => {
+            attempt = 0;
+            this.clearFailure();
+            onOpen?.();
+          },
+        });
+        for await (const frame of frames) onMessage?.(frame);
+      } catch (error) {
+        if (!stream.signal.aborted) this.showFailure(error);
+      } finally {
+        this.openStreams = this.openStreams.filter((tracked) => tracked !== stream);
+      }
+      if (stream.signal.aborted) return; // the panel went away; do not come back
+      onClose?.();
+      const wait = Math.min(1000 * 2 ** attempt, 10_000);
+      attempt += 1;
+      this.reconnectTimers.push(setTimeout(follow, wait));
+    };
+    follow();
   }
 
   // ------------------------------------------------------------ failures ---

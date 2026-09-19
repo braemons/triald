@@ -7,14 +7,15 @@
 // (with triald actually driving the loop) looks like, and the debug panel
 // is the bench instrument a rig does not need mounted at all.
 //
-// **Everything here goes through `dev/API.md`.**
+// **Everything here goes through the rpcs in `proto/triald/v1/`.**
 //
-// Several slots, painted by different things, for the reason
-// statemachined's session panel gives: the live state arrives on a
-// WebSocket several times a second and must never touch a field a person is
-// mid-edit on, so the state slot and the controls slots are separate subtrees.
+// Several slots, painted by different things, for the reason statemachined's
+// session panel gives: the live state arrives on `State.WatchState` several
+// times a second and must never touch a field a person is mid-edit on, so the
+// state slot and the controls slots are separate subtrees.
 
 import { BasePanelElement, defineElementOnce } from "./base_panel_element.js";
+import { wordFor, TrialCountCriterionSchema, PolicyOriginSchema } from "./daemon_api_client.js";
 
 export class SessionPanelElement extends BasePanelElement {
   constructor() {
@@ -62,30 +63,12 @@ export class SessionPanelElement extends BasePanelElement {
     this.paintRecording();
     this.paintCurrent();
     this.paintLast();
-    this.openStateStream();
-  }
-
-  openStateStream() {
-    const socket = this.trackSocket(this.api.openStateStream());
-    socket.addEventListener("message", (event) => {
-      const message = JSON.parse(event.data);
-      this.state = message.state ?? message;
+    this.followStateStream(() => {
       this.paintLive();
       this.paintLifecycle();
       this.paintRecording();
       this.paintCurrent();
       this.paintLast();
-      this.clearFailure();
-    });
-    socket.addEventListener("close", () => {
-      // Reopen unless this panel is going away. A stream that dies quietly
-      // when the daemon restarts leaves a page that looks live and is not.
-      if (this.isConnected && this.openSockets.includes(socket)) {
-        this.openSockets = this.openSockets.filter((each) => each !== socket);
-        setTimeout(() => {
-          if (this.isConnected) this.openStateStream();
-        }, 1000);
-      }
     });
   }
 
@@ -118,7 +101,9 @@ export class SessionPanelElement extends BasePanelElement {
         "set progress",
         progress
           ? `${progress.accepted_trials} accepted, ${progress.hits} hits` +
-            (progress.target != null ? ` / ${progress.target} (${progress.criterion})` : "")
+            (progress.target != null
+              ? ` / ${progress.target} ${wordFor(TrialCountCriterionSchema, progress.criterion)}`
+              : "")
           : "-",
       ],
       ["rounds", `${state.rounds_completed} of ${state.rounds_configured}`],
@@ -129,7 +114,7 @@ export class SessionPanelElement extends BasePanelElement {
         `${state.totals.accepted} accepted / ${state.totals.total} reported` +
           (state.totals.hit_rate != null ? `, hit rate ${(state.totals.hit_rate * 100).toFixed(1)}%` : ""),
       ],
-      ["policy", `${state.policy.name} (${state.policy.origin})`],
+      ["policy", `${state.policy.name} (${wordFor(PolicyOriginSchema, state.policy.origin)})`],
     ]);
   }
 

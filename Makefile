@@ -8,7 +8,7 @@
 # it is not.
 
 .PHONY: help sync test lint fmt typecheck check sim clean version \
-        proto check-proto deb wheel packages package-check
+        proto check-proto web check-web deb wheel packages package-check
 
 help:
 	@echo "make sync       install the dev environment"
@@ -19,6 +19,8 @@ help:
 	@echo "make check      lint + typecheck + test + the proto + a simulated session"
 	@echo "make proto      regenerate daemon/src/triald/_proto/ from proto/"
 	@echo "make check-proto  the proto compiles, is current, and matches the taxonomy"
+	@echo "make web        regenerate client/web/elements/daemon_api_client.js from proto/"
+	@echo "make check-web  the committed browser client is what proto/ produces"
 	@echo "make sim        run a simulated session"
 	@echo "make version    the version the git tag implies"
 	@echo ""
@@ -97,7 +99,31 @@ check-proto: ## the proto compiles, is current, and matches the taxonomy
 	@rm -rf build/proto-check
 	@python3 tools/check_outcomes.py
 
+# **The browser's protobuf client is generated and committed**, like
+# daemon/src/triald/_proto/ and for the same reason: a checkout runs with uv
+# alone. `packaging/Makefile` copies `client/web/` into the wheel, so a bundle
+# produced at package time would make npm a build dependency of every release.
+# It is not. `npm ci` installs exactly what package-lock.json pins, so the
+# bundle is reproducible; `check-web` is what holds it to the proto.
+web: ## regenerate client/web/elements/daemon_api_client.js from proto/
+	@cd client/web && npm ci --silent --no-audit --no-fund && node build_daemon_api_client.mjs
+
+check-web: ## fail if the committed browser client is not what proto/ produces
+	@mkdir -p build
+	@cp client/web/elements/daemon_api_client.js build/web-check.js 2>/dev/null || true
+	@$(MAKE) --no-print-directory web
+	@diff -q build/web-check.js client/web/elements/daemon_api_client.js >/dev/null || { \
+	  echo "client/web/elements/daemon_api_client.js is not what proto/ produces:"; \
+	  diff build/web-check.js client/web/elements/daemon_api_client.js | head -20; \
+	  echo "it has been regenerated — commit it with the change that caused it."; \
+	  exit 1; \
+	}
+	@rm -f build/web-check.js
+
 # What CI runs. The simulated session is the end-to-end smoke test.
+#
+# Not check-web: it needs npm and, the first time, a network — and this target
+# has to work on a rig. CI runs `make check-web` as its own step.
 check: lint typecheck test check-proto
 	uv run --directory daemon triald sim --trials 200
 	uv run --directory daemon triald policy check ../examples/staircase.py --trial-types contrast_0,contrast_1,contrast_2,contrast_3,contrast_4,contrast_5

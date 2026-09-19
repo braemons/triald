@@ -7,12 +7,7 @@
 // seeing what a session will do and switching what is running.
 
 import { BasePanelElement, defineElementOnce } from "./base_panel_element.js";
-
-const CRITERIA_LABELS = {
-  accepted_trials: "accepted trials",
-  hits: "hits",
-  all_trials: "all completed trials",
-};
+import { wordFor, TrialCountCriterionSchema } from "./daemon_api_client.js";
 
 export class SetsPanelElement extends BasePanelElement {
   constructor() {
@@ -73,7 +68,7 @@ export class SetsPanelElement extends BasePanelElement {
     const rule = set.switch_rule;
     const armed = rule.enabled && rule.target && rule.count > 0;
     const progress = set.active ? this.progress : null;
-    const criterion = CRITERIA_LABELS[rule.criterion] ?? rule.criterion;
+    const criterion = wordFor(TrialCountCriterionSchema, rule.criterion);
 
     let ruleLine;
     if (armed && progress) {

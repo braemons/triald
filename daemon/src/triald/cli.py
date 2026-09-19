@@ -11,9 +11,9 @@ Three things matter here and none of them is the daemon itself:
 * ``triald replay`` reruns a recorded session's outcomes through a different
   policy and shows which decisions changed.
 
-``triald serve`` is the fourth, and is the daemon: it brings up the HTTP and
-WebSocket API and the web UI that is written against it. It needs the ``serve``
-extra, which the rest of this module deliberately does not.
+``triald serve`` is the fourth, and is the daemon: it brings up the gRPC API,
+the browser edge that speaks Connect, and the web UI written against it. It
+needs the ``serve`` extra, which the rest of this module deliberately does not.
 """
 
 from __future__ import annotations

@@ -29,6 +29,7 @@ edge, and a rig with no browser on it loses nothing by never starting it.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import struct
@@ -166,13 +167,11 @@ def _error_body(problem: Aborted) -> tuple[bytes, int]:
     body: dict = {"code": code, "message": problem.detail}
     refusal = problem.metadata.get(REFUSAL_METADATA_KEY)
     if refusal is not None:
-        import base64
-
+        # Padded: this is `google.protobuf.Any` in JSON, which is standard
+        # base64. gRPC-Web's unpadded `-bin` metadata is a different rule on a
+        # different transport, and the browser client here reads this one.
         body["details"] = [
-            {
-                "type": "triald.v1.Error",
-                "value": base64.b64encode(refusal).decode().rstrip("="),
-            }
+            {"type": "triald.v1.Error", "value": base64.b64encode(refusal).decode()}
         ]
     return json.dumps(body).encode(), status
 

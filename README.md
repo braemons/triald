@@ -1,8 +1,8 @@
 # Trial Control Daemon — triald
 
-> **Status:** early alpha — the domain logic, the scripting API, the HTTP and
-> WebSocket API and a proof-of-principle web UI work and are tested. The
-> clients, the rig integration and the packaging are not built yet.
+> **Status:** early alpha — the domain logic, the scripting API, the gRPC API
+> and the web UI work and are tested. The Python client, the rig integration
+> and the packaging are not finished yet.
 
 **triald** decides what trial runs next, records what happened, and lets you write
 the decision in Python. It is the part of a behavioural rig that owns trial
@@ -54,7 +54,7 @@ uv run triald serve                       # http://127.0.0.1:8420, API docs at /
 ```
 
 The session view shows the counters, the round, the sets and how far the loaded
-one has got towards its switch rule, and updates over a WebSocket as the session
+one has got towards its switch rule, and follows the state stream as the session
 runs. Its debug panel drives a **simulated subject** through the real trial loop —
 step a trial, step five hundred, free-run on a timer, or select a trial and report
 any of the eleven outcomes by hand with the frame-loss and fixation modifiers, to

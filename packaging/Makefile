@@ -200,6 +200,17 @@ $(SRC)/daemon/pyproject.toml: $(shell find $(ROOT)/daemon/src $(ROOT)/client -ty
 	@mkdir -p $(SRC)
 	cp -a $(ROOT)/daemon $(SRC)/
 	cp -a $(ROOT)/client/web $(SRC)/daemon/src/triald/web
+	@# The panels' build inputs are not panels. `client/web/` is an npm project
+	@# as well as a web root -- it generates elements/daemon_api_client.js from
+	@# proto/ -- and node_modules alone would put tens of megabytes of somebody
+	@# else's source into a .deb that installs onto a rig. The generated bundle
+	@# is committed, so nothing here is needed to serve the UI.
+	rm -rf $(SRC)/daemon/src/triald/web/node_modules \
+	       $(SRC)/daemon/src/triald/web/gen \
+	       $(SRC)/daemon/src/triald/web/src \
+	       $(SRC)/daemon/src/triald/web/package.json \
+	       $(SRC)/daemon/src/triald/web/package-lock.json \
+	       $(SRC)/daemon/src/triald/web/build_daemon_api_client.mjs
 	sed -i 's/^version = "0.0.0"$$/version = "$(PY_VERSION)"/' $(SRC)/daemon/pyproject.toml
 	@grep -q '^version = "$(PY_VERSION)"$$' $(SRC)/daemon/pyproject.toml || { \
 	  echo "error: the version sentinel in pyproject.toml did not match."; \

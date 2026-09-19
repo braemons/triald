@@ -7,26 +7,32 @@
 
 import { BasePanelElement, defineElementOnce } from "./base_panel_element.js";
 
+// The wire values are the proto's own enum value names (`triald.v1.Ordering`),
+// because that is what protobuf's JSON mapping puts on the wire and reads back.
+// Spelling them out here rather than deriving them from the descriptor keeps
+// the label and the help text beside the value they describe -- and a value
+// that ever stops existing fails loudly, at the select, rather than silently
+// selecting nothing.
 const ORDERINGS = [
-  ["random_in_round", "Random in round", "One round in the bag: every round holds exactly the configured weights."],
+  ["ORDERING_RANDOM_IN_ROUND", "Random in round", "One round in the bag: every round holds exactly the configured weights."],
   [
-    "random_in_experiment",
+    "ORDERING_RANDOM_IN_EXPERIMENT",
     "Random in experiment",
     "Every round in the bag at once: the experiment is balanced, single rounds are not.",
   ],
-  ["ascending", "Ascending", "Lowest trial type index first, strictly in order."],
-  ["descending", "Descending", "Highest trial type index first -- the mirror of ascending."],
+  ["ORDERING_ASCENDING", "Ascending", "Lowest trial type index first, strictly in order."],
+  ["ORDERING_DESCENDING", "Descending", "Highest trial type index first -- the mirror of ascending."],
   [
-    "random_with_replacement",
+    "ORDERING_RANDOM_WITH_REPLACEMENT",
     "Random with replacement",
     "Each trial an independent draw on the weights. Runs of one condition are longer than people expect.",
   ],
 ];
 
 const CRITERIA = [
-  ["accepted_trials", "accepted trials"],
-  ["hits", "hits"],
-  ["all_trials", "all completed trials"],
+  ["TRIAL_COUNT_CRITERION_ACCEPTED_TRIALS", "accepted trials"],
+  ["TRIAL_COUNT_CRITERION_HITS", "hits"],
+  ["TRIAL_COUNT_CRITERION_ALL_TRIALS", "all completed trials"],
 ];
 
 const ACCEPT_FIELDS = [

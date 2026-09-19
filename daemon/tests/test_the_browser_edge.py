@@ -3,8 +3,8 @@
 
 Two things are worth stating about what is tested here.
 
-**The record shape and the wire shape must not drift.** ``trials.jsonl`` and the
-WebSocket stream carry the same trial, and one test asserts they carry it
+**The record shape and the wire shape must not drift.** ``trials.jsonl`` and
+``State.WatchState`` carry the same trial, and one test asserts they carry it
 identically. That is the whole reason the models were written to mirror
 ``as_dict()`` rather than to be nicer than it.
 

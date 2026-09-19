@@ -103,9 +103,31 @@ def the_application_the_unit_would_build() -> None:
     # Package data, which has gone missing from a wheel before and is invisible
     # until a browser asks for it.
     web = files("triald") / "web"
-    for asset in ("index.html", "application_shell.js", "triald_user_interface.css"):
+    for asset in (
+        "index.html",
+        "application_shell.js",
+        "triald_user_interface.css",
+        "elements/daemon_api_client.js",
+    ):
         assert (web / asset).is_file(), f"{asset} is not in the package"
-    print("  the web UI: shell, script and stylesheet")
+    print("  the web UI: shell, script, stylesheet and the generated client")
+
+    # **And nothing else.** `client/web/` is an npm project as well as a web
+    # root, and the copy in packaging/Makefile drops its build inputs by name —
+    # a list, and therefore a list somebody can add to without noticing. This
+    # is the check from the other side: everything under `web/` must be a file
+    # a browser would ask for. A stray node_modules is tens of megabytes of
+    # somebody else's source installed onto a rig.
+    servable = {".html", ".js", ".css", ".json", ".svg", ".ico", ".png"}
+    web_root = Path(str(web))
+    for path in web_root.rglob("*"):
+        if path.is_dir():
+            assert path.name != "node_modules", f"node_modules is in the package: {path}"
+            continue
+        relative = path.relative_to(web_root)
+        assert path.suffix in servable, f"{relative} is in the package and is not servable"
+        assert relative.name != "package.json", "package.json is in the package"
+    print(f"  and nothing but panels: {sum(1 for _ in web_root.rglob('*') if _.is_file())} files")
 
 
 def the_command_line_the_unit_runs(rig_configuration_class: type) -> None:
