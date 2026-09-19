@@ -6,7 +6,7 @@ from __future__ import annotations
 import grpc
 
 from triald.api import convert
-from triald.api.service import ServiceError, SessionService
+from triald.api.service import Refusal, ServiceError, SessionService
 from triald.api.servicers import state_message
 from triald.api.servicers.refusals import answering
 from triald.v1 import (  # ty: ignore[unresolved-import]  (resolved at runtime by __init__'s __path__)
@@ -42,7 +42,7 @@ class SetStoreServicer(service_pb2_grpc.SetStoreServicer):
                     f"the request says {request.name!r} and the set says "
                     f"{request.set.name!r}; renaming a set is a delete and a write",
                     kind="sets",
-                    status=400,
+                    refusal=Refusal.BAD_REQUEST,
                 )
             async with self.service.publishing():
                 self.service.put_set(convert.trial_type_set_from_wire(request.set))

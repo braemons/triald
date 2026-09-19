@@ -6,7 +6,7 @@ from __future__ import annotations
 import grpc
 
 from triald.api import convert
-from triald.api.service import ServiceError, SessionService
+from triald.api.service import Refusal, ServiceError, SessionService
 from triald.api.servicers import state_message
 from triald.api.servicers.refusals import answering
 from triald.v1 import (  # ty: ignore[unresolved-import]  (resolved at runtime by __init__'s __path__)
@@ -36,7 +36,9 @@ class ConfigServicer(service_pb2_grpc.ConfigServicer):
             try:
                 changes = convert.config_patch_from_wire(request)
             except convert.config.Refused as problem:
-                raise ServiceError(str(problem), kind="config", status=400) from problem
+                raise ServiceError(
+                    str(problem), kind="config", refusal=Refusal.BAD_REQUEST
+                ) from problem
             async with self.service.publishing():
                 return convert.config_update_to_wire(self.service.update_config(changes))
 

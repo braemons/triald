@@ -11,7 +11,7 @@ from __future__ import annotations
 import grpc
 
 from triald.api import convert
-from triald.api.service import ServiceError, SessionService
+from triald.api.service import Refusal, ServiceError, SessionService
 from triald.api.servicers.refusals import answering
 from triald.v1 import (  # ty: ignore[unresolved-import]  (resolved at runtime by __init__'s __path__)
     service_pb2_grpc,
@@ -55,7 +55,7 @@ class TrialServicer(service_pb2_grpc.TrialServicer):
                     "a report that arrives late or twice must be refusable rather than "
                     "attributed to the trial after the one it belongs to",
                     kind="request",
-                    status=422,
+                    refusal=Refusal.BAD_REQUEST,
                 )
             async with self.service.publishing():
                 record = self.service.report_outcome(

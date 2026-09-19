@@ -14,7 +14,10 @@ package triald.v1;
 // `triald-error-bin`, rather than as a sentence for a client to parse. The
 // status message carries `detail` as well, for grpcurl and for logs.
 message Error {
-  // A short machine-readable kind, e.g. `session`.
+  // A short machine-readable kind: `session`, `request`, `recording`, `sets`,
+  // `config`, `policy`, `trial_mismatch`. Additive — new kinds appear, none
+  // change meaning — so a client switches on it and treats one it has never
+  // seen as it treats `request`.
   string error = 1;
   string detail = 2;
 }

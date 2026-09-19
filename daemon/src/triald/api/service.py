@@ -28,6 +28,7 @@ import contextlib
 import copy
 import dataclasses
 import datetime as dt
+import enum
 import hashlib
 import logging
 import random
@@ -43,7 +44,12 @@ from triald.outcomes import OutcomeReport
 from triald.policy import DeclarativePolicy, Policy, PolicyError, load_policy
 from triald.recording import RecordingError, SessionRecorder
 from triald.runner import run_trial
-from triald.session import Session, SessionConfig, SessionError
+from triald.session import (
+    Session,
+    SessionConfig,
+    SessionError,
+    TheOutcomeIsForAnotherTrial,
+)
 from triald.state import SessionState, TrialRecord, TrialSpec
 from triald.trialtypes import TRIAL_TYPES_PER_SET, TrialTypeSet, TrialTypeStore
 
@@ -147,14 +153,48 @@ WATCHDOG_INTERVAL_SECONDS = 0.5
 STREAM_BACKLOG = 4
 
 
+class Refusal(enum.Enum):
+    """Why a call was refused — the category, in this daemon's own words.
+
+    **These used to be HTTP status codes**, carried as integers from the days
+    when this API was routes: `409` for a wrong moment, `422` for a body that
+    did not validate. The API is gRPC now and nothing here answers HTTP, so an
+    integer somebody has to look up was a fossil twice over — `api/servicers/`
+    translated it, and the domain layer had to know a number that meant nothing
+    to it.
+
+    Four categories, and the whole vocabulary. Each maps to exactly one gRPC
+    status in `api/servicers/refusals.py`; the *case* within a category is
+    `ServiceError.kind`, which is what a client actually switches on.
+    """
+
+    #: The daemon is not in a state where this call means anything: no session
+    #: armed, a trial already in flight. Nothing about the request is wrong.
+    WRONG_MOMENT = "wrong_moment"
+
+    #: Understood and refused: a set whose weights are all zero, an arm-time
+    #: setting changed mid-session, a policy that did not pass its check.
+    BAD_REQUEST = "bad_request"
+
+    #: No such set, no such policy.
+    NO_SUCH_THING = "no_such_thing"
+
+    #: The daemon broke, not the caller. A recording that could not be written
+    #: is the one that matters: it stops the session rather than continuing
+    #: quietly.
+    THE_DAEMON_BROKE = "the_daemon_broke"
+
+
 class ServiceError(Exception):
     """A call was refused, with a message meant to be shown to a person."""
 
-    def __init__(self, detail: str, *, kind: str = "request", status: int = 409) -> None:
+    def __init__(
+        self, detail: str, *, kind: str = "request", refusal: Refusal = Refusal.WRONG_MOMENT
+    ) -> None:
         super().__init__(detail)
         self.detail = detail
         self.kind = kind
-        self.status = status
+        self.refusal = refusal
 
 
 class SessionService:
@@ -251,7 +291,7 @@ class SessionService:
         try:
             self._session.arm()
         except SessionError as exc:
-            raise ServiceError(str(exc), kind="session", status=400) from exc
+            raise ServiceError(str(exc), kind="session", refusal=Refusal.BAD_REQUEST) from exc
 
     def stop(self, reason: str = "stopped by the operator") -> None:
         self._session.stop(reason)
@@ -260,7 +300,9 @@ class SessionService:
     def require_running(self) -> Session:
         if not self._session.running:
             raise ServiceError(
-                "the session is not running - arm it first", kind="session", status=409
+                "the session is not running - arm it first",
+                kind="session",
+                refusal=Refusal.WRONG_MOMENT,
             )
         return self._session
 
@@ -283,7 +325,7 @@ class SessionService:
                 raise ServiceError(
                     f"could not open a session directory under {self.results_dir}: {exc}",
                     kind="recording",
-                    status=500,
+                    refusal=Refusal.THE_DAEMON_BROKE,
                 ) from exc
             self._recorder = recorder
             session.recorder = recorder
@@ -348,11 +390,18 @@ class SessionService:
         session = self.require_running()
         try:
             record = session.report_outcome(report, trial_id=trial_id)
+        except TheOutcomeIsForAnotherTrial as exc:
+            # Its own kind, so a rig loop can catch this one by name: it is the
+            # refusal a correct caller can hit, and the answer is to drop the
+            # report rather than to retry it against whatever is in flight now.
+            raise ServiceError(str(exc), kind="trial_mismatch") from exc
         except SessionError as exc:
             raise ServiceError(str(exc), kind="session") from exc
         except RecordingError as exc:
             self._session.stop(f"the recording failed: {exc}")
-            raise ServiceError(str(exc), kind="recording", status=500) from exc
+            raise ServiceError(
+                str(exc), kind="recording", refusal=Refusal.THE_DAEMON_BROKE
+            ) from exc
         return record
 
     def cancel_trial(self, reason: str) -> TrialRecord:
@@ -390,7 +439,9 @@ class SessionService:
                 run_trial(session, self._subject)
             except (SessionError, RecordingError) as exc:
                 session.stop(f"the step failed: {exc}")
-                raise ServiceError(str(exc), kind="session", status=500) from exc
+                raise ServiceError(
+                    str(exc), kind="session", refusal=Refusal.THE_DAEMON_BROKE
+                ) from exc
             ran += 1
         if not session.running:
             self._close_recorder()
@@ -522,7 +573,7 @@ class SessionService:
                 f"set {new_set.name!r} is running and every weight is zero, so a "
                 f"round would be empty - give one trial type a weight first",
                 kind="sets",
-                status=400,
+                refusal=Refusal.BAD_REQUEST,
             )
 
         self.store.put(new_set)
@@ -539,7 +590,7 @@ class SessionService:
         try:
             self.store.remove(name)
         except KeyError as exc:
-            raise ServiceError(str(exc), kind="sets", status=404) from exc
+            raise ServiceError(str(exc), kind="sets", refusal=Refusal.NO_SUCH_THING) from exc
         return self.sets()
 
     def load_set(self, name: str) -> None:
@@ -552,7 +603,7 @@ class SessionService:
         try:
             session.load_set(name)
         except (KeyError, SessionError) as exc:
-            raise ServiceError(str(exc), kind="sets", status=400) from exc
+            raise ServiceError(str(exc), kind="sets", refusal=Refusal.BAD_REQUEST) from exc
 
     # -- config -----------------------------------------------------------------
 
@@ -568,7 +619,7 @@ class SessionService:
         try:
             changed = self._session.reconfigure(changes)
         except SessionError as exc:
-            raise ServiceError(str(exc), kind="config", status=400) from exc
+            raise ServiceError(str(exc), kind="config", refusal=Refusal.BAD_REQUEST) from exc
 
         # initial_set, the seed and the numbering are read when a session is
         # constructed, so a change to one has to build a new session rather than
@@ -668,7 +719,7 @@ class SessionService:
             raise ServiceError(
                 f"the policy did not pass its check, so it was not loaded: {first}",
                 kind="policy",
-                status=400,
+                refusal=Refusal.BAD_REQUEST,
             )
 
         directory = self.policy_dir or Path(tempfile.gettempdir()) / "triald-policies"
@@ -679,7 +730,7 @@ class SessionService:
         try:
             self._policy = load_policy(path)
         except PolicyError as exc:  # pragma: no cover - check_policy just passed
-            raise ServiceError(str(exc), kind="policy", status=400) from exc
+            raise ServiceError(str(exc), kind="policy", refusal=Refusal.BAD_REQUEST) from exc
 
         self._policy_name = name
         self._policy_source = source

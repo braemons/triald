@@ -517,8 +517,12 @@ class TrialServicer:
 
         Refuses `failed_precondition` when `trial_id` is not the trial in flight:
         a report that arrived late or twice must never be attributed to the trial
-        after the one it belongs to. The record says whether the trial was *accepted*, which is
-        not the same as counted, and names which check refused it.
+        after the one it belongs to. That refusal carries `error: "trial_mismatch"`
+        — its own kind, because it is the one a *correct* caller can hit, and the
+        answer is to drop the report rather than retry it.
+
+        The record says whether the trial was *accepted*, which is not the same as
+        counted, and names which check refused it.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')

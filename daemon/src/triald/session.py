@@ -46,6 +46,18 @@ class SessionError(Exception):
     """The session could not be armed, or was asked to do something out of order."""
 
 
+class TheOutcomeIsForAnotherTrial(SessionError):
+    """A report arrived naming a trial that is not the one in flight.
+
+    Its own class, and its own refusal kind on the API, because it is the one
+    refusal a *correct* rig loop can hit: a report that crossed the network
+    twice, or one that arrived after the watchdog had already given up on the
+    trial. A caller that catches it drops the report; a caller that retried it
+    would attribute one trial's result to the next, which is the whole reason
+    `trial_id` is on the message (`contracts/INTERACTIONS.md` §5.1).
+    """
+
+
 @dataclasses.dataclass(slots=True)
 class SessionConfig:
     """One experiment's settings. The declarative half of the scripting story.
@@ -333,12 +345,13 @@ class Session:
                 requires it on every inbound message.
 
         Raises:
-            SessionError: if no trial is in flight, or `trial_id` is not its.
+            SessionError: if no trial is in flight.
+            TheOutcomeIsForAnotherTrial: if `trial_id` is not the one in flight.
         """
         if self._current is None:
             raise SessionError("no trial is in flight")
         if trial_id is not None and trial_id != self._current.trial_number:
-            raise SessionError(
+            raise TheOutcomeIsForAnotherTrial(
                 f"outcome reported for trial {trial_id}, but trial "
                 f"{self._current.trial_number} is the one in flight"
             )

@@ -5,15 +5,11 @@
 `convert/` and the domain modules, and carrying a sentence meant to be read by
 a person. This is the single place it becomes a gRPC status.
 
-**The codes are chosen for what they mean**, not by transcribing the HTTP
-status this API used to answer with:
-
-* `failed_precondition` — the daemon is not in a state where this means
-  anything: no session armed, a trial already in flight, a late outcome report.
-* `invalid_argument` — understood and refused: a config change that is not
-  allowed while a session runs, a set whose name does not match.
-* `not_found` — no such set, no such policy.
-* `internal` — the daemon broke, not the caller.
+**The codes are chosen for what they mean.** `ServiceError` carries a
+`Refusal` — the daemon's own four categories, named in its own words — and this
+table is the one place each becomes a gRPC status. It used to carry an HTTP
+status integer instead, which meant the domain layer knew a number that meant
+nothing to it and this module read it back out again.
 
 **The whole refusal also travels as itself.** A status code is a category and a
 message is a sentence; `error` — `session`, `sets`, `policy` — is the part a
@@ -30,7 +26,7 @@ from collections.abc import Awaitable, Callable
 
 import grpc
 
-from triald.api.service import ServiceError
+from triald.api.service import Refusal, ServiceError
 from triald.v1 import (  # ty: ignore[unresolved-import]  (resolved at runtime by __init__'s __path__)
     common_pb2,
 )
@@ -40,14 +36,24 @@ from triald.v1 import (  # ty: ignore[unresolved-import]  (resolved at runtime b
 #: set name with a non-ASCII character in it.
 REFUSAL_METADATA_KEY = "triald-error-bin"
 
-#: The daemon's own statuses, as the gRPC codes that mean the same thing.
-_CODE_FOR_STATUS = {
-    400: grpc.StatusCode.INVALID_ARGUMENT,
-    404: grpc.StatusCode.NOT_FOUND,
-    409: grpc.StatusCode.FAILED_PRECONDITION,
-    422: grpc.StatusCode.INVALID_ARGUMENT,
-    500: grpc.StatusCode.INTERNAL,
+#: The daemon's own categories, as the gRPC codes that mean the same thing.
+#:
+#: Exhaustive by construction: `_code_for` refuses a category nothing has
+#: chosen a code for, rather than answering `UNKNOWN` and leaving a caller to
+#: guess. Adding a `Refusal` is then a failing test, which is the point.
+_CODE_FOR_REFUSAL = {
+    Refusal.WRONG_MOMENT: grpc.StatusCode.FAILED_PRECONDITION,
+    Refusal.BAD_REQUEST: grpc.StatusCode.INVALID_ARGUMENT,
+    Refusal.NO_SUCH_THING: grpc.StatusCode.NOT_FOUND,
+    Refusal.THE_DAEMON_BROKE: grpc.StatusCode.INTERNAL,
 }
+
+
+def _code_for(refusal: Refusal) -> grpc.StatusCode:
+    code = _CODE_FOR_REFUSAL.get(refusal)
+    if code is None:  # pragma: no cover - a new Refusal with no code chosen
+        raise AssertionError(f"no gRPC status chosen for {refusal}")
+    return code
 
 
 async def refuse(context: grpc.aio.ServicerContext, refusal: ServiceError):
@@ -57,7 +63,7 @@ async def refuse(context: grpc.aio.ServicerContext, refusal: ServiceError):
     it might, so callers `raise` the result to make the control flow visible.
     """
     await context.abort(
-        _CODE_FOR_STATUS.get(refusal.status, grpc.StatusCode.UNKNOWN),
+        _code_for(refusal.refusal),
         refusal.detail,
         trailing_metadata=(
             (

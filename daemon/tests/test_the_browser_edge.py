@@ -315,6 +315,12 @@ def test_an_outcome_for_another_trial_is_refused(edge: Edge):
     assert response.status == 412  # failed_precondition
     assert f"trial {trial} is the one in flight" in response.detail
 
+    # And it says so by *name*, not only in the sentence. This is the one
+    # refusal a correct rig loop can hit - a report that crossed the network
+    # twice, or arrived after the watchdog gave up - so a client has to be able
+    # to catch it without matching on English.
+    assert response.refusal.error == "trial_mismatch"
+
     # And the refused report changed nothing: the trial is still in flight.
     state = edge.call("State/ReadState").json
     assert int(state["current"]["trial_number"]) == trial

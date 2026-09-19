@@ -84,10 +84,22 @@ A refusal is a gRPC status, and the status code carries the category:
 
 | Code | Means |
 |---|---|
+| `failed_precondition` | right request, wrong moment — not armed, already running, a trial in flight |
 | `invalid_argument` | understood and refused — a bad set, an unusable switch chain, an arm-time setting changed mid-session |
 | `not_found` | no such set, no such policy |
-| `failed_precondition` | right request, wrong moment — not armed, already running, a trial in flight |
 | `internal` | a write failed. A recording that silently misses the disk is worse than an aborted one |
+
+Those four are `Refusal` in `api/service.py`, and `api/servicers/refusals.py`
+is the one place each becomes a status. `error` names the case within the
+category, and is the field to switch on: `session`, `request`, `recording`,
+`sets`, `config`, `policy`, `trial_mismatch`.
+
+**`trial_mismatch` is the one worth handling by name.** Every other refusal
+means somebody has to change something; this one a correct rig loop can hit on
+its own, when a report crosses the network twice or arrives after the watchdog
+has given up on the trial. The answer is to drop that report — never to retry
+it against whatever is in flight now, which is precisely what the daemon
+refused to do on the caller's behalf.
 
 The category is not the whole refusal, so the refusal also travels as itself.
 `triald.v1.Error` is encoded into the trailing metadata entry
