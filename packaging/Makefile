@@ -118,7 +118,7 @@ ARCH := $(strip \
 
 # Documentation that ships in the package, because the box in the rack is where
 # somebody is standing when they need it.
-DOCS := README.md LICENSE dev/API.md dev/PLAN.md
+DOCS := README.md LICENSE docs/reference/api.md dev/PLAN.md
 
 .PHONY: packages-amd64 packages-arm64 packages packages-here package-in-container \
         deb rpm wheel stage stage-docs stage-deterministic check inspect repro \

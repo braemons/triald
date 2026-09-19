@@ -118,8 +118,10 @@ and sink operators map onto the state stream directly).
 
 ## Documentation
 
-- [`dev/API.md`](dev/API.md) — the API: what comes in, what goes out, and the
-  reasoning behind each shape.
+- [`proto/triald/v1/`](proto/triald/v1/) — **the API itself**: every type and
+  every rpc, with what each one refuses and why, authored by hand.
+- [`docs/reference/api.md`](docs/reference/api.md) — the API for a person: what
+  an rpc is for, when to use one rather than another, and what a refusal means.
 - [`dev/PLAN.md`](dev/PLAN.md) — the functional scope: what came from
   `TrialTypeManager`, what is new, what is deliberately out, and the open
   questions.

@@ -40,8 +40,8 @@ uv run triald serve                       # API + web UI on 127.0.0.1:8420
 
 `triald serve` puts the same simulator behind a web UI whose debug panel steps
 it, free-runs it, or drives one trial by hand. Everything it does goes through
-the API in `dev/API.md`; nothing reaches into `triald.Session` by a private
-route.
+the rpcs in `proto/triald/v1/`; nothing reaches into `triald.Session` by a
+private route.
 
 `triald sim` is the fastest feedback loop in the repo — a session of 500 trials
 runs in well under a second, with no hardware and no vstimd. Use it before

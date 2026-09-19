@@ -618,26 +618,30 @@ standalone `questplus`, or `triald.adaptive`, otherwise.
 
 ### API surface — **done**, less two groups
 
-Specified in full, with the reasoning, in [API.md](API.md); what follows is the
-decision record behind it. `Environment` and `Records` are still **planned**, and
-the config-file shapes still want models of their own.
+The interface is `proto/triald/v1/`; [`docs/reference/api.md`](../docs/reference/api.md)
+is the same thing for a person. `Environment` and `Records` are still
+**planned**, and the config-file shapes still want types of their own.
 
-**One transport: HTTP for request/reply, WebSocket for the state stream, JSON
-throughout.** The web UI and all three clients use the identical API — there is
-no mirroring layer.
+**One transport: gRPC**, with the browser edge speaking Connect on the port
+beside it. The web UI and all three clients use the identical rpcs — there is no
+mirroring layer.
 
-This deliberately departs from vstimd, which speaks ZeroMQ and protobuf. Both of
-protobuf's real benefits fail to arrive here:
+This section used to argue the opposite, and the argument is kept here because
+the reasoning is instructive about what it got wrong. It said protobuf's two
+benefits fail to arrive: **wire efficiency** buys nothing against ~1 KB once per
+trial, and **one schema, many languages** does not survive contact with MATLAB,
+whose protobuf support is poor. What is left, it concluded, is a `protoc` step
+in every client's build and a protocol nobody can `curl`.
 
-- **wire efficiency** buys nothing against ~1 KB once per trial, with an
-  inter-trial interval to spend;
-- **one schema, many languages** does not survive contact with MATLAB, whose
-  protobuf support is poor enough that its client was already going over
-  HTTP/JSON — so the plan already had two wire formats before it had one client.
-
-What is left is a `buf`/`protoc` step in every client's build, and a protocol
-nobody can `curl`. For a tool people will poke at from MATLAB and a browser
-console at 11pm, readable-on-the-wire is worth more than compact.
+Both halves were answering the wrong question. The interface is not a transport:
+it is the one written-down description of what this daemon accepts and what it
+answers, and the alternative to generating clients from it was writing that
+description again in each of them — which is what the hand-kept copy of
+statemachined's paths and refusal shapes in `api/statemachine_executor.py`
+already cost once. The `curl` half assumed nobody would build a client; there
+are clients and CLIs now, and a browser reaches the same rpcs. MATLAB remains
+the hardest case, and it is a matter of one generated client rather than of a
+second wire format.
 
 The same reasoning removes ZeroMQ: an HTTP round trip on a rig LAN costs about a
 millisecond, in a gap measured in hundreds. Carrying two transports and two
@@ -719,33 +723,36 @@ policy reaches the daemon*. `CheckPolicy` returns diagnostics with line numbers
 so the web editor can mark the offending line rather than printing a traceback
 underneath it.
 
-#### The schema survives; the compiler does not - **done for the wire**
+#### The schema is the contract - **done for the wire**
 
-Dropping protobuf drops the encoding, not the contract. **The wire schema is the
-contract, not the Python API** — three clients are written against it, never
-against `triald.Session`.
+**The proto is the contract, not the Python API** — three clients are written
+against it, never against `triald.Session`.
 
-**Pydantic models → OpenAPI 3.1, which FastAPI emits for free → generated
-clients.** Python and C#/.NET have mature OpenAPI generators; MATLAB skips
-generation entirely and calls `webread`/`webwrite`. Schema evolution is by
-convention rather than field numbers: add fields, never repurpose a name.
+This section used to say "dropping protobuf drops the encoding, not the
+contract", and planned pydantic models → OpenAPI 3.1 → generated clients. What
+actually happened is that the second description was the problem rather than the
+encoding: an OpenAPI document generated from the handlers describes what they
+happen to do, which is a restatement rather than a contract, and it cannot
+express what an rpc *refuses*. `proto/triald/v1/` carries the types and the
+behaviours, is authored by hand, and generates every client. Schema evolution is
+by field number: add fields, never repurpose one.
 
-The models also consolidate three things that are separate today, which is worth
+The interface also consolidates three things that were separate, which is worth
 as much as the API:
 
-| Today | With the models | |
+| Before | Now | |
 |---|---|---|
 | hand-written `as_dict()` in `state.py` | serialisation for free | not yet |
 | config files parsed and validated by hand | validation with real messages, which matters for a file a scientist edits | not yet |
-| the JSONL record shape, defined implicitly by `as_dict()` | the same models, so the record and the wire cannot drift | **done, by test** |
+| the JSONL record shape, defined implicitly by `as_dict()` | one description, so the record and the wire cannot drift | **done, by test** |
 
-The third arrived without the first. `TrialRecordModel` was written to serialise
-byte-for-byte to what `as_dict()` writes, and
-`test_the_wire_and_the_record_carry_the_trial_identically` asserts it - which is
-what turns retiring `as_dict()` from a risky refactor into a safe one. It is also
-why the timestamp fields carry an explicit serialiser: pydantic spells UTC `Z`
-where `datetime.isoformat()` spells it `+00:00`, and the record format has years
-of files behind it, so the record wins.
+The third arrived without the first. `test_the_wire_carries_the_whole_trial`
+asserts that everything the record holds about a trial reaches the wire, which
+is what turns retiring `as_dict()` from a risky refactor into a safe one. The
+two are no longer byte-identical and the test says so: protobuf's JSON mapping
+spells UTC `Z` and a 64-bit number as a string, where the record spells `+00:00`
+and a plain integer. The record format has years of files behind it, so the
+record did not move.
 
 This follows vstimd's own principle — *the config format is the runtime shape, no
 DTO* — rather than adding a parallel set of transfer objects beside the
@@ -754,9 +761,11 @@ working, tested code; it belongs with the API work, not before it.
 
 ### Web interface — session view **done**; the editor and the charts **planned**
 
-A proof of principle lives in `src/triald/web/`: three files, no build step, no
-framework and no CDN, because a rig box may have no route to the internet and a
-browser in a booth should not be waiting on unpkg. One WebSocket delivers a whole
+It lives in `client/web/`, a sibling of `daemon/`: no framework and no CDN,
+because a rig box may have no route to the internet and a browser in a booth
+should not be waiting on unpkg. There is exactly one build step —
+`elements/daemon_api_client.js`, generated from `proto/` and committed, so a
+checkout still runs with uv alone. `State.WatchState` delivers a whole
 `SessionState` on every change and the page redraws from it, so there is no
 client-side model of the session that can disagree with the daemon about what is
 happening.
@@ -768,8 +777,8 @@ one trial by hand through all eleven outcomes with the frame-loss and
 imprecise-fixation modifiers - the cheapest way there is to watch a trial be
 *counted but not accepted*.
 
-Served by the daemon, no separate deployment, over the same HTTP and WebSocket
-API the clients use rather than a second bespoke one.
+Served by the daemon, no separate deployment, over the same rpcs the clients
+use rather than a second bespoke API.
 
 **Session view.** Current trial type, trial number, per-type counters, progress
 through the round and towards the switch rule, recent outcomes. The numbers VStim
@@ -849,25 +858,24 @@ Export to PNG and CSV, so a chart can go into a lab notebook.
 
 ### Clients — **planned**
 
-Three, against the OpenAPI schema rather than against each other. All three speak
-the same HTTP and JSON, so none of them needs a code generator to *work* —
-generation is a convenience for the typed ones, not a prerequisite.
+Three, against `proto/triald/v1/` rather than against each other. The types
+each one holds are generated from it, so none of them is a second description of
+this API that can disagree with it.
 
 **Python** (`client/python`) — the reference client, mirroring vstimd's. LGPLv3
 rather than the daemon's AGPLv3, so importing it does not place an experiment's
 own code under copyleft — the same split vstimd uses, and for the same reason.
 
-**MATLAB** (`client/matlab`) — a thin wrapper over `webread` and `webwrite`,
-which are built in and need no toolbox. This is the client that decided the
-protocol: MATLAB's protobuf support is poor enough that it was going over
-HTTP/JSON regardless, and a schema that one of three clients cannot use is not
-doing the job it was chosen for. The `py.` bridge stays documented for anyone
-wanting the typed Python client from MATLAB, with the caveat that it needs
-MATLAB and Python versions that agree.
+**MATLAB** (`client/matlab`) — the hard case, and the one this plan once let
+decide the protocol. MATLAB's protobuf support is poor, which was the argument
+for HTTP and JSON everywhere; the answer now is that this client is the one
+place the work has to be done, rather than the whole family paying for it. The
+`py.` bridge stays documented for anyone wanting the typed Python client from
+MATLAB, with the caveat that it needs MATLAB and Python versions that agree.
 
 **Bonsai** (`client/bonsai`) — a `Bonsai.Triald` NuGet package exposing source
-and sink operators over `HttpClient` and `ClientWebSocket`, both in the .NET base
-library. Bonsai is reactive, so the mapping is unusually clean: the state stream
+and sink operators over `Grpc.Net.Client`, which is the supported gRPC stack on
+.NET. Bonsai is reactive, so the mapping is unusually clean: the state stream
 *is* an observable sequence, `NextTrial` is a source, and `ReportOutcome` is a
 sink.
 
@@ -1105,13 +1113,14 @@ imported by triald, avoids reimplementing the binary reader entirely.
 ## Roadmap
 
 1. ~~Domain logic, policy API, simulator, tests~~ — **done**
-2. ~~The API schema~~ — **done** for the wire and the record shape, in
-   `api/schemas.py`. Outstanding: the config-file shapes, and retiring
-   `state.py`'s `as_dict()` methods in favour of the models.
-3. ~~HTTP and WebSocket API, plus policy upload and storage~~ — **done**
-4. ~~Web interface, session view~~ — **done**
+2. ~~The interface~~ — **done** for the wire and the record shape, in
+   `proto/triald/v1/`. Outstanding: the config-file shapes, and retiring
+   `state.py`'s `as_dict()` methods.
+3. ~~The API, plus policy upload and storage~~ — **done**, as gRPC with a
+   Connect edge for the browser
+4. ~~Web interface, session view~~ — **done**, on a generated client
 5. Session and rig config files, and the VStim importer
-6. Python client, then MATLAB (HTTP/JSON), then Bonsai
+6. Python client, then MATLAB, then Bonsai
 7. Web interface: the CodeMirror editor, then the charts
 8. The coupling contract, then the microcontroller's outcome table and firmware
 9. Packaging: numpy and scipy in the tree, nfpm, systemd, the apt archive,

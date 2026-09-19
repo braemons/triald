@@ -8,7 +8,7 @@ Two things are worth stating about what is tested here.
 identically. That is the whole reason the models were written to mirror
 ``as_dict()`` rather than to be nicer than it.
 
-**The debug controls are not a second code path.** A ``/api/debug/step`` goes
+**The debug controls are not a second code path.** A ``Debug/Step`` goes
 through :func:`triald.runner.run_trial`, so the counted-versus-accepted
 distinction has to survive it exactly as it does on a rig. It is tested here for
 the same reason it is tested in ``test_session.py``.

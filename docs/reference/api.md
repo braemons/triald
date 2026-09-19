@@ -1,26 +1,110 @@
 # triald — the API
 
-What crosses the wire, in both directions. Everything here is generated from
-`src/triald/api/schemas.py`; the models are the contract, and this file is the
-prose that says why each shape is the shape it is. The live OpenAPI document is
-at `/openapi.json`, with Swagger at `/docs`.
+> **Status:** written against the daemon that serves it, and kept beside it. The
+> interface itself — every type and every rpc — is `proto/triald/v1/`, and the
+> servicers are written against code generated from it. **This is not a second
+> description of that**, which is why it does not repeat field lists. What it
+> says is the part a schema cannot: what an rpc is *for*, when to use one rather
+> than another, and what a refusal means.
 
-**One transport: HTTP for request/reply, a WebSocket for the state stream, JSON
-throughout.** The web UI and all three clients use the identical API — there is
-no mirroring layer, and nothing reaches into `triald.Session` by a private route.
-See dev/PLAN.md, *API surface*, for why this is not protobuf and not ZeroMQ.
-
-**One daemon, one session.** No call carries a session id. That matches
-one-daemon-per-rig; cross-rig aggregation is a separate tool's job.
+**The API is gRPC.** Eight services — `State`, `Session`, `Trial`, `SetStore`,
+`Config`, `Policy`, `Events`, `Debug` — and twenty-nine rpcs, on the daemon's
+own port.
 
 ```sh
 triald serve                                  # 127.0.0.1:8420, demo experiment
 triald serve --port 8080 --results-dir ~/data --policy staircase.py
 ```
 
+The **browser edge** listens on the port beside it and speaks the **Connect
+protocol**, which is gRPC's semantics over plain HTTP: a browser has no access
+to trailers and no control over HTTP/2 framing, so it cannot speak gRPC itself.
+The edge dispatches into the same servicers by descriptor, so the two transports
+cannot drift — an rpc implemented once is reachable from both, and a rig with no
+browser on it loses nothing by never starting the edge.
+`daemon/src/triald/api/web_edge.py` is the whole of it; it is short because the
+Connect protocol is small.
+
+**One daemon, one session.** No call carries a session id. That matches
+one-daemon-per-rig; cross-rig aggregation is a separate tool's job.
+
 Binding is to localhost by default and never `0.0.0.0`. A policy is Python
 running inside the daemon's process, so this API is remote code execution by
 design; exposing it should be a decision, not a discovery.
+
+This used to be HTTP and JSON with a route per call, so that `curl` and
+`webread` would work with nothing installed. It is not any more. These services
+do not do CRUD — `Arm`, `Next`, `ReportOutcome`, `LoadSet` and `Step` are
+*commands*, a verb and an outcome rather than a resource and a method — and
+spelling them as routes made every one of them a small invention. There are
+generated clients and CLIs now; `contracts/INTERACTIONS.md` §7 is the argument
+in full.
+
+---
+
+## Conventions
+
+**A name travels unchanged.** Every field pins `json_name` to its snake_case
+spelling, so `trial_number` is `trial_number` in the proto, on the binary wire,
+in the JSON a browser sees, in the `trials.jsonl` line on disk and in both
+clients. Protobuf's default would have camel-cased the JSON and given the same
+field two names.
+
+**Every rpc has its own request message**, including the fifteen that carry
+nothing. `google.protobuf.Empty` can never grow a field, so an rpc that took one
+would need a second rpc the day it learns an argument; `ArmRequest{}` just grows
+one. Additive growth is the whole of `contracts/INTERACTIONS.md` §11's
+versioning rule.
+
+**Unknown fields in a *response* are for the consumer to ignore** — that is what
+lets an old console talk to a new daemon. In a *request* the browser edge's JSON
+path refuses them by name, before a servicer sees one. The binary path does not
+and cannot: protobuf's parser keeps unknown fields rather than refusing them,
+and no daemon in this family can opt out. A client that sends a field this
+daemon has never heard of gets no complaint, so do not rely on one.
+
+**The outcome codes are a wire contract.** They are in every `.tdr` the lab has
+written and every analysis script that reads one, and are never renumbered.
+
+```
+-1 UNDETERMINED   2 WRONG_RESPONSE        5 EARLY   8 UNEXPECTED_START_SIGNAL
+ 0 NOT_STARTED    3 EARLY_HIT             6 LATE    9 WRONG_START_SIGNAL
+ 1 HIT            4 EARLY_WRONG_RESPONSE  7 EYE_ERROR  10 CANCELLED
+                                                       11 NEVER_FINISHED
+```
+
+`NEVER_FINISHED` (11) is the first code that is not VStim's, and **the only one
+triald assigns to itself** — nothing sends it. Everything else is a verdict from
+whoever watched the animal; this one is triald recording that no verdict arrived
+before the trial's `trial_cap_ms` expired. See *The trial deadline* below.
+
+### Refusals
+
+A refusal is a gRPC status, and the status code carries the category:
+
+| Code | Means |
+|---|---|
+| `invalid_argument` | understood and refused — a bad set, an unusable switch chain, an arm-time setting changed mid-session |
+| `not_found` | no such set, no such policy |
+| `failed_precondition` | right request, wrong moment — not armed, already running, a trial in flight |
+| `internal` | a write failed. A recording that silently misses the disk is worse than an aborted one |
+
+The category is not the whole refusal, so the refusal also travels as itself.
+`triald.v1.Error` is encoded into the trailing metadata entry
+**`triald-error-bin`**:
+
+```json
+{"error": "session", "detail": "trial 12 is still in flight; report its outcome before selecting another"}
+```
+
+`error` is stable and machine-readable — this is what a client switches on;
+`detail` is one sentence for a person, because it usually is read by one. A UI
+that renders only `FAILED_PRECONDITION` throws away the useful half.
+
+Over Connect the same message rides in the error's `details` array, as
+`google.protobuf.Any`, so the browser reads the identical three fields without a
+second refusal format existing. `api/servicers/refusals.py` is the single place
+a `ServiceError` becomes a status.
 
 ---
 
@@ -33,7 +117,7 @@ design; exposing it should be a decision, not a discovery.
    │          │  ◀──────────────────  │                  │
    └──────────┘        outcome        └──────────────────┘
         │
-        │  HTTP · WebSocket
+        │  gRPC · Connect
         ▼
    web UI · Python · MATLAB · Bonsai
 ```
@@ -42,45 +126,35 @@ Six calls make a session run. Everything else is settings, inspection or debug:
 
 | | |
 |---|---|
-| `POST /api/session/arm` | validate everything and start |
-| `POST /api/trial/next` | select the next trial type → `TrialSpec` |
+| `Session/Arm` | validate everything and start |
+| `Trial/Next` | select the next trial type → `TrialSpec` |
 | *(the trial happens elsewhere)* | vstimd renders; the microcontroller watches |
-| `POST /api/trial/outcome` | report how it ended → `TrialRecord` |
-| `GET /api/state` · `WS /api/stream` | what is happening |
-| `POST /api/session/stop` | end it |
+| `Trial/ReportOutcome` | report how it ended → `TrialRecord` |
+| `State/ReadState` · `State/WatchState` | what is happening |
+| `Session/Stop` | end it |
 
 ---
 
 ## Coming in
 
-Three request bodies carry everything a rig sends. The rest of the API is
-settings.
+Two request messages carry everything a rig sends; the rest of the API is
+settings. Their fields are in `proto/triald/v1/trial.proto` and are not
+restated here.
 
 ### `OutcomeReport` — the primary inbound message
 
-`POST /api/trial/outcome`. Every counter, every round, every set switch and every
-line of the record is driven from this one object, so it has to carry every
+`Trial/ReportOutcome`. Every counter, every round, every set switch and every
+line of the record is driven from this one message, so it has to carry every
 modifier that participates in the accept decision — the daemon has no other way
-to learn them.
-
-| Field | Type | Meaning |
-|---|---|---|
-| `trial_id` | int | **Required.** Which trial this is the outcome of. `409` if it is not the trial in flight. |
-| `outcome` | int or name | The `.tdr` code. `1` and `"HIT"` are both accepted; always returned as the code. |
-| `manipulandum` | int or name | Which input device produced it. |
-| `reaction_time_ms` | float? | Recorded, never used in the accept decision. |
-| `terminating_interval` | int? | The interval the trial ended in. |
-| `precise_fixation` | bool | **From the eye monitor.** False can veto acceptance on its own. |
-| `frame_loss` | `{interval, frame}`? | **From vstimd.** Non-null can veto acceptance on its own. |
-| `reward_ms` | int | What was *actually* delivered, which may differ from the type's setting. |
-| `hit_condition` | bool | Whether the time sequence set a hit condition. |
-| `simulated` | bool | The outcome came from a simulator, not an animal. |
-| `note` | str? | Free text, recorded verbatim. |
+to learn them. Two of those modifiers come from other machines and can veto
+acceptance on their own: `precise_fixation` from the eye monitor, and
+`frame_loss` from vstimd.
 
 `trial_id` addresses the message; it is not part of the outcome and is not
-written into the record, which already carries the trial's number. It is required
-rather than defaulted, and an outcome for any other trial is **refused** rather
-than accepted: the report comes from another machine over a network, and one that
+written into the record, which already carries the trial's number. It is
+`optional` although it is required — proto3 has no required fields, and a plain
+`int64` cannot tell "trial 0" from "no trial named" — and an outcome for any
+other trial is **refused** rather than accepted: the report comes from another machine over a network, and one that
 arrives late or twice would otherwise be attributed to the trial *after* the one
 it belongs to. triald cannot tell which of the two is the truth, so it takes
 neither.
@@ -102,10 +176,12 @@ before the trial's `trial_cap_ms` expired. See *The trial deadline* below.
 
 ### `SessionConfig` / `ConfigPatch` — the declarative settings
 
-`GET /api/config`, `PATCH /api/config`. Everything the web UI can edit without
-anybody writing Python. A patch carries only the fields you are changing; `null`
-means "leave it alone", except on `stop_after_trials`, where null is itself a
-value meaning "no limit" — clear it by sending `0`.
+`Config/ReadConfig`, `Config/PatchConfig`. Everything the web UI can edit
+without anybody writing Python. Every field of the patch is `optional`, which is
+what makes a patch a patch: an absent field means "leave it alone", and that is
+a question protobuf can only answer for a field that tracks presence. The one
+exception is `stop_after_trials`, where "no limit" is itself a value — clear it
+by sending `0`.
 
 | Field | Meaning |
 |---|---|
@@ -117,7 +193,7 @@ value meaning "no limit" — clear it by sending `0`.
 | `stop_when_rounds_done` | Stop after the last trial of the last round. |
 | `stop_after_trials` + `stop_criterion` | Stop after N trials of a chosen kind. |
 | `extend_trial_type_number` | Number trial types `set_number * 256 + index`. |
-| `seed` | RNG seed. Generated and recorded when null, so every session replays. |
+| `seed` | RNG seed. Generated and recorded when unset, so every session replays. |
 | `trial_cap_ms` | How long a trial may take before triald gives up on it. `0` disables. |
 
 ### The trial deadline
@@ -149,7 +225,7 @@ dead executor costs one trial, not the session.
 
 ### `TrialTypeSet` — a set and its switch rule
 
-`PUT /api/sets/{name}`. A set is a named list of trial types plus **its own**
+`SetStore/WriteSet`. A set is a named list of trial types plus **its own**
 switch rule, because the rule travels with the set: through the store, through
 "save as", and onto another rig.
 
@@ -183,7 +259,7 @@ that crosses to an executor, and it is still not the trial type — several
 conditions routinely share one graph.
 
 The name is spelled out because a bare `graph` says nothing about whose it is —
-triald holds none of its own. On statemachined's `POST /api/trial/configure` the
+triald holds none of its own. On statemachined's `Trial/Configure` the
 same value is the field `graph`, where the namespace supplies the rest; a client
 maps the one field.
 
@@ -193,7 +269,7 @@ maps the one field.
 
 ### `SessionState` — the whole snapshot
 
-The payload of `GET /api/state`, of every WebSocket frame, and of the reply to
+The payload of `State/ReadState`, of every `State/WatchState` frame, and of the reply to
 every mutating call, so there is one description of what is happening rather than
 several that drift.
 
@@ -234,10 +310,10 @@ set_name · statemachine_graph · reward_ms · recording · paused · started_at
 
 ### `TrialRecord` — one finished trial
 
-The reply to `ReportOutcome`, and **byte-for-byte the line written to
-`trials.jsonl`**. A test asserts it. Anything that can read a session directory
-can read the stream, and a divergence is a failing test rather than a discovery
-six months later.
+The reply to `ReportOutcome`, and **everything the line in `trials.jsonl` holds
+about that trial**. A test asserts that nothing is dropped on the way, so
+anything that can read a session directory can read the stream, and a divergence
+is a failing test rather than a discovery six months later.
 
 ```jsonc
 {
@@ -245,10 +321,17 @@ six months later.
   "outcome": { "code": 1, "name": "HIT", /* …every modifier… */ },
   "accepted": false,
   "refusal_reason": "frame loss, and frame-loss trials are not accepted",
-  "ended_at": "2026-09-01T13:39:59.718969+00:00",
+  "ended_at": "2026-09-01T13:39:59.718969Z",
   "policy_state": { "level": 3 }
 }
 ```
+
+The two were asserted byte-identical while the wire *was* the record model.
+They are two shapes now and the test says so: the record keeps `+00:00` and
+plain integers, and the wire is protobuf's JSON mapping — RFC 3339 with a `Z`,
+and a 64-bit number as a string, because JSON's number cannot hold one
+faithfully. The record format is the one with years of files behind it and did
+not move.
 
 **`accepted` is the field to read first.** Every reported outcome is *counted*.
 Only an *accepted* one consumes from the bag, advances the round, and moves a set
@@ -260,80 +343,68 @@ and it does not consume from the bag.
 `refusal_reason` says *which* of the three turned the trial away, because an
 experimenter watching a session stall at 40 accepted trials needs to know.
 
-### Errors
-
-A refusal is a 4xx and an `ErrorModel`; `detail` is written to be read by a
-person, because it usually is.
-
-```jsonc
-{ "error": "session", "detail": "trial 12 is still in flight; report its outcome before selecting another" }
-```
-
-| Status | When |
-|---|---|
-| 400 | The request was understood and is wrong — a bad set, an unusable switch chain, an arm-time setting changed mid-session. |
-| 404 | No such set. |
-| 409 | Right request, wrong moment — not armed, already running, a trial in flight. |
-| 422 | The body did not validate. Unknown fields are refused by name, never ignored. |
-| 500 | A write failed. A recording that silently misses the disk is worse than an aborted one. |
-
 ---
 
 ## The calls
 
-### Session — `/api/session`
+### `Session`
 
 | | |
 |---|---|
-| `POST /arm` | Validate everything and start. **Builds a new session**: counters, rounds, history, the RNG and the simulated subject all start again. Refuses rather than failing later — a missing set, an empty set, an unusable switch chain three hops away. |
-| `POST /stop` | End the session. Closes the record. |
-| `POST /recording/start` | Record from the next trial. Opens a session directory when `--results-dir` is set; without one the flags still move and nothing reaches the disk. |
-| `POST /recording/pause` | Keep running, stop recording. A pausing trial runs, but scores nothing and is never recorded. |
-| `POST /recording/resume` | |
-| `POST /recording/stop` | Close the record. The session keeps running. |
+| `Arm` | Validate everything and start. **Builds a new session**: counters, rounds, history, the RNG and the simulated subject all start again. Refuses rather than failing later — a missing set, an empty set, an unusable switch chain three hops away. |
+| `Stop` | End the session. Closes the record. |
+| `StartRecording` | Record from the next trial. Opens a session directory when `--results-dir` is set; without one the flags still move and nothing reaches the disk. |
+| `PauseRecording` | Keep running, stop recording. A pausing trial runs, but scores nothing and is never recorded. |
+| `ResumeRecording` | |
+| `StopRecording` | Close the record. The session keeps running. |
 
-### Trial loop — `/api/trial`
+### `Trial`
 
 | | |
 |---|---|
-| `POST /next` | → `TrialSpec`. Refused while a trial is in flight, which is what stops one trial's result being attributed to another. |
-| `POST /outcome` | `OutcomeReport` → `TrialRecord`. |
-| `POST /cancel` | `{reason}` → `TrialRecord` with outcome `CANCELLED`. Recorded rather than dropped, so a gap in the numbering never has to be explained. |
+| `Next` | → `TrialSpec`. Refused while a trial is in flight, which is what stops one trial's result being attributed to another. |
+| `ReportOutcome` | `OutcomeReport` → `TrialRecord`. |
+| `Cancel` | `CancelTrial` → `TrialRecord` with outcome `CANCELLED`. Recorded rather than dropped, so a gap in the numbering never has to be explained. |
 
 **Pull, not push.** The caller asks for a trial when it is ready, which keeps
-triald reactive and stops it becoming the session's clock. See dev/PLAN.md,
+triald reactive and stops it becoming the session's clock. See `dev/PLAN.md`,
 *Open questions*.
 
-### State — `/api/state`, `/api/stream`
+### `State`
 
-`GET /api/state` returns the snapshot. `WS /api/stream` pushes a `StreamMessage`
-on connect and on every change:
+`ReadState` returns the snapshot. `WatchState` is a server stream that pushes a
+`StreamFrame` on connect and on every change:
 
 ```jsonc
-{ "kind": "state", "sequence": 42, "at": "…", "state": { /* SessionState */ } }
+{ "sequence": "42", "at": "…", "state": { /* SessionState */ } }
 ```
+
+The frame is an envelope with a `oneof` in it, and `state` is the only arm
+there is today. That is the whole reason it exists: a later message — a log
+line, a chart point — can be added without every client having to learn a
+second stream. A client ignores an arm it does not know rather than painting it.
 
 Frames are **coalesced, not queued**, for a subscriber that falls behind: this is
 a state stream, so the newest snapshot is the only one worth having, and a slow
 browser tab must not be able to hold up a session. A gap in `sequence` means
 frames were dropped, which is not an error.
 
-### Sets — `/api/sets`
+### `SetStore`
 
 | | |
 |---|---|
-| `GET /` | Every set, each with its rule, weights, `set_number` and whether it is active — plus `chain_problem`, which is the check `arm` refuses on, run continuously so the UI shows a broken chain before anybody starts. |
-| `PUT /{name}` | Add or replace. Replacing the active set rebuilds the bag and restarts the round; the counters are banked by name and survive it. Renaming is a delete and a put. |
-| `DELETE /{name}` | Refused for the set that is loaded. |
-| `POST /{name}/load` | Make it active. Its block starts from nothing — exactly what an automatic switch does, so loading by hand and switching by rule cannot disagree about what loading means. |
+| `ReadSets` | Every set, each with its rule, weights, `set_number` and whether it is active — plus `chain_problem`, which is the check `arm` refuses on, run continuously so the UI shows a broken chain before anybody starts. |
+| `WriteSet` | Add or replace. Replacing the active set rebuilds the bag and restarts the round; the counters are banked by name and survive it. Renaming is a delete and a put. |
+| `DeleteSet` | Refused for the set that is loaded. |
+| `LoadSet` | Make it active. Its block starts from nothing — exactly what an automatic switch does, so loading by hand and switching by rule cannot disagree about what loading means. |
 
 **A sequence is what a chain of rules makes**; there is no separate type for one.
 Two sets pointing at each other alternate, three walk in order, and a set with no
 rule ends the walk.
 
-### Config — `/api/config`
+### `Config`
 
-`GET`, `PATCH`, plus `POST /reset-rounds` and `POST /reset-counters`. A patch
+`ReadConfig`, `PatchConfig`, plus `ResetRounds` and `ResetCounters`. A patch
 answers with what the change actually cost:
 
 ```jsonc
@@ -348,18 +419,18 @@ The settings split three ways, and the split is the whole content of the call:
 | **bag-shaped** | `ordering`, `rounds`, `avoid_repeat` | Rebuilds the bag, so the round starts again. Counters untouched. |
 | **arm-time** | `initial_set`, `extend_trial_type_number`, `seed` | **Refused while running.** Each decides something that has already happened, so changing one would leave a record whose first half means something different from its second. |
 
-`reset-counters` clears **every bank, not only the loaded set's** — a half-cleared
-session is worse than either state. The bag and the round are left alone;
-`reset-rounds` is the other half.
+`ResetCounters` clears **every bank, not only the loaded set's** — a
+half-cleared session is worse than either state. The bag and the round are left
+alone; `ResetRounds` is the other half.
 
-### Policy — `/api/policy`
+### `Policy`
 
 | | |
 |---|---|
-| `GET /` | Name, class, `sha256`, origin, and the last `snapshot()`. `?source=true` for the text. |
-| `POST /check` | `{name, source}` → diagnostics with **line numbers**, so an editor can mark the offending line rather than printing a traceback underneath it. Imports it and smoke-runs it over a throwaway copy of the experiment, so a check never touches counters somebody is watching. |
-| `PUT /` | Store and load. **Checked first, always** — a syntax error must never reach a session. Refused while a session runs; arming is the swap boundary. |
-| `DELETE /` | Back to the declarative behaviour. |
+| `ReadPolicy` | Name, class, `sha256`, origin, and the last `snapshot()`. `source: true` for the text. |
+| `CheckPolicy` | `PolicySource` → diagnostics with **line numbers**, so an editor can mark the offending line rather than printing a traceback underneath it. Imports it and smoke-runs it over a throwaway copy of the experiment, so a check never touches counters somebody is watching. |
+| `LoadPolicy` | Store and load. **Checked first, always** — a syntax error must never reach a session. Refused while a session runs; arming is the swap boundary. |
+| `ClearPolicy` | Back to the declarative behaviour. |
 
 **Source text, never a path.** The rig is not your laptop, a path means nothing
 to a browser on another machine, and "which version of the staircase ran on
@@ -370,9 +441,9 @@ A policy exception never ends a session: every hook is wrapped, the traceback is
 logged and recorded against the trial, and the declarative behaviour stands.
 Failures appear in `state.policy_errors`.
 
-### Events — `/api/events`
+### `Events`
 
-`POST /note` appends an experimenter's note to the event stream. Refused when
+`Note` appends an experimenter's note to the event stream. Refused when
 nothing is recording, rather than silently dropped: a note that goes nowhere is
 worse than one that could not be written, because the person who typed it
 believes it was kept.
@@ -381,7 +452,7 @@ Events are the custom-message channel. **Corrections are appended, never applied
 in place**: realising at trial 50 that the subject ID was typed wrong writes a new
 event, so the record shows both what was believed and when it changed.
 
-### Debug — `/api/debug`
+### `Debug`
 
 Drives a **simulated subject** so the whole daemon can be exercised with no rig
 attached. It is the same loop: a step goes through `runner.run_trial`, the same
@@ -389,9 +460,9 @@ four calls a rig makes, with the microcontroller replaced.
 
 | | |
 |---|---|
-| `GET`/`PUT /sim` | The subject's outcome probabilities, including per trial type. The RNG keeps its place, so a session stays reproducible up to the point somebody moved a slider. |
-| `POST /step` | `{trials}` → runs that many whole trials, or fewer if the session stops. Refused with a trial in flight. |
-| `GET`/`PUT /free-run` | `{running, interval_ms}` — step on a timer until stopped or the session ends. |
+| `ReadSim`/`WriteSim` | The subject's outcome probabilities, including per trial type. The RNG keeps its place, so a session stays reproducible up to the point somebody moved a slider. |
+| `Step` | `StepRequest` → runs that many whole trials, or fewer if the session stops. Refused with a trial in flight. |
+| `ReadFreeRun`/`WriteFreeRun` | `{running, interval_ms}` — step on a timer until stopped or the session ends. |
 
 ---
 
@@ -453,8 +524,8 @@ trials with nobody watching:
 
 The **whole chain** is validated when the session is armed, so a set three hops
 away that nobody filled in is caught before a session is left alone with it
-overnight. An `A → B → A` loop is fine and ends the walk. `GET /api/sets` runs the
-same check continuously and reports it as `chain_problem`.
+overnight. An `A → B → A` loop is fine and ends the walk. `SetStore/ReadSets` runs
+the same check continuously and reports it as `chain_problem`.
 
 **Stopping wins over switching.** There is nothing to switch to once the
 experiment is ending.
@@ -477,7 +548,7 @@ between two sets losing a set's counts every time it comes back to it.
 
 ## Not in this build
 
-Specified in dev/PLAN.md, and deliberately not here yet. They are named so the
+Specified in `dev/PLAN.md`, and deliberately not here yet. They are named so the
 absence is a decision rather than an oversight.
 
 | Group | Calls |
@@ -486,7 +557,8 @@ absence is a decision rather than an oversight.
 | Records | `ListSessions`, `GetSession`, `ReplaySession` |
 | Sets | `SaveSet` to a file, and the VStim configuration importer |
 
-The web UI's policy editor is likewise still a plan: `/api/policy` is complete,
+The web UI's policy editor is likewise still a plan: the `Policy` service is
+complete,
 but the page shows the running policy rather than editing it. When it arrives it
 is **CodeMirror, read-only by default, and Check-before-Load is not skippable** —
 a tweak between blocks, not a place to author policies, or they stop being
