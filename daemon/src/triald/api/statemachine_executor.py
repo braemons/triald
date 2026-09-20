@@ -12,31 +12,34 @@ statemachined's paths, refusal shape and stream rules: `/api/trial/configure`,
 the `{"error", "detail", "context"}` body, the `fell_out_of_the_ring` frame.
 That was a second description of another daemon's API living in this repository,
 and the failure mode of a second description is that it is right until the day
-it is not. It is now `statemachined.client`, which ships from that repository in
-the same distribution as the daemon and is tested against it, and this file is
-what is genuinely triald's: the translation between `TrialConfiguration` and a
-call, and between a refusal and :class:`~triald.executor.ExecutorError`.
+it is not. It is now `statemachined-client`, which is generated from
+`proto/statemachined/v1/` in that repository and tested against the daemon that
+serves it, and this file is what is genuinely triald's: the translation between
+`TrialConfiguration` and a call, and between a refusal and
+:class:`~triald.executor.ExecutorError`.
 
-**Depending on `statemachined` is not depending on the daemon.** That package is
-tiered: the base is the documents and the HTTP client, `[device]` is a serial
-port, `[serve]` is the daemon. triald takes the base, which is pydantic, httpx
-and websockets. INTERACTIONS.md §2's rule is unaffected -- the decision
-authority knows its participants, and they know nobody.
+**Depending on `statemachined-client` is not depending on the daemon.** It is a
+distribution of its own, and its whole dependency list is grpcio and protobuf.
+Not pyserial: triald never opens a serial port. Not pydantic: the documents it
+would validate are documents triald never reads. Not fastapi or uvicorn: triald
+talks to a daemon rather than being one. INTERACTIONS.md §2's rule is
+unaffected -- the decision authority knows its participants, and they know
+nobody.
 
 That translation is small and it stays here, because it is where triald's
 vocabulary meets somebody else's. `statemachine_graph` becomes `graph` in one
-place; every error the client raises becomes the one exception the session loop
-knows how to act on, in one place.
+place; every refusal the client raises becomes the one exception the session
+loop knows how to act on, in one place.
 
 **triald is a subscriber here, not a recipient.** The executor publishes its
-trace and assumes nobody read it; opening `WS /api/trace/stream` is the whole of
-subscribing and closing it is the whole of leaving. Nothing on the far end waits
-for triald, holds a trial for it, or retries. Which means the deadline is
+trace and assumes nobody read it; opening `WatchTrace` is the whole of
+subscribing and cancelling it is the whole of leaving. Nothing on the far end
+waits for triald, holds a trial for it, or retries. Which means the deadline is
 triald's: only the side that knows a trial is in flight can tell "not yet" from
 "never", and that is this side.
 
-**`?observer=triald` is a label and nothing more.** It puts a name next to the
-connection on the executor's own diagnostics page, so a person can see triald is
+**The observer name is a label and nothing more.** It puts `triald` next to the
+connection on the executor's own diagnostics, so a person can see triald is
 listening before they reach for a packet capture. Nothing is granted by it.
 """
 
@@ -44,17 +47,20 @@ from __future__ import annotations
 
 import contextlib
 import logging
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from typing import Any
 
-import httpx
-from statemachined.client import StatemachinedClient, StatemachinedError
-from statemachined.client import finished_trials as published_trials_finishing
+from statemachined_client import (
+    DaemonRefusedTheRequest,
+    StatemachinedClient,
+    TraceEntry,
+)
 
 from triald.executor import (
     ExecutorError,
     TrialConfiguration,
     TrialExecutor,
+    is_a_finished_trial,
     outcome_from_events,
 )
 from triald.outcomes import OutcomeReport
@@ -70,30 +76,62 @@ OBSERVER_NAME = "triald"
 #: session.
 DEFAULT_TIMEOUT_SECONDS = 10.0
 
-__all__ = ["DEFAULT_TIMEOUT_SECONDS", "OBSERVER_NAME", "StateMachineExecutor"]
+__all__ = [
+    "DEFAULT_TIMEOUT_SECONDS",
+    "OBSERVER_NAME",
+    "StateMachineExecutor",
+    "flattened",
+]
+
+
+def flattened(entry: TraceEntry) -> dict[str, Any]:
+    """One published trace entry as the flat dict triald's rules read.
+
+    **The shape is statemachined's own, not a convenience invented here.** That
+    daemon's trace ring holds flat records -- `kind`, `trial_id`, `outcome`,
+    `exit_cause`, `measured_duration_microseconds` in one dict -- and its wire
+    type names four of those fields and carries the rest in `payload`, because
+    the set differs per kind and protobuf has no type for "and some other
+    things". Putting them back together is the whole of this function.
+
+    It happens here rather than in the client because it is the *executor's*
+    reading of somebody else's record, and `triald.executor` must stay free of
+    any dependency: `outcome_from_events` and `reaction_time_milliseconds` are
+    triald's rules and are testable with a list of dicts, which is what keeps
+    them testable without a rig.
+
+    The named fields win over the payload deliberately. They are the ones the
+    wire type promises, and a payload that happened to carry a `trial_id` of
+    its own would otherwise decide which trial an entry belonged to.
+    """
+    return {
+        **entry.payload,
+        "entry_number": entry.entry_number,
+        "kind": entry.kind,
+        "trial_id": entry.trial_id,
+    }
 
 
 class StateMachineExecutor(TrialExecutor):
-    """One `statemachined`, addressed by base URL."""
+    """One `statemachined`, addressed by host or `host:port`."""
 
     def __init__(
         self,
-        base_url: str,
+        address: str,
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
-        client: httpx.Client | None = None,
+        client: StatemachinedClient | None = None,
     ) -> None:
         """
         Args:
-            client: what carries the requests. The default opens one on the
-                network; the tests pass a client over the executor's own ASGI
-                app, so the loop is exercised against the real far end rather
-                than against triald's belief about it.
+            address: `host`, or `host:port`. The port is the executor's **gRPC**
+                one, which is one above the port its panels are served on; the
+                client's `DEFAULT_PORT` is the same rule written on this side.
+            client: an already-open client, for a caller that has one. The
+                default opens its own.
         """
-        self.base_url = base_url.rstrip("/")
+        self.address = address
         self.timeout_seconds = timeout_seconds
-        self.rig = StatemachinedClient(
-            self.base_url, timeout_seconds=timeout_seconds, http_client=client
-        )
+        self.rig = client or StatemachinedClient(address)
 
     def close(self) -> None:
         self.rig.close()
@@ -102,7 +140,7 @@ class StateMachineExecutor(TrialExecutor):
 
     def configure(self, configuration: TrialConfiguration) -> None:
         with _refusals_become_executor_errors():
-            self.rig.trial.configure(
+            self.rig.configure_trial(
                 configuration.trial_id,
                 # The executor's own name for it. triald spells the field
                 # `statemachine_graph` because in triald's vocabulary a bare
@@ -114,11 +152,11 @@ class StateMachineExecutor(TrialExecutor):
 
     def start(self, trial_id: int) -> None:
         with _refusals_become_executor_errors():
-            self.rig.trial.start(trial_id)
+            self.rig.start_trial(trial_id)
 
     def cancel(self, trial_id: int, reason: str = "") -> None:
         with _refusals_become_executor_errors():
-            self.rig.trial.cancel(trial_id)
+            self.rig.cancel_trial(trial_id)
 
     # ------------------------------------------------------------ the trial ---
 
@@ -129,65 +167,65 @@ class StateMachineExecutor(TrialExecutor):
         rather than fatal: whatever the stream did, this answers exactly.
         """
         with _refusals_become_executor_errors():
-            return self.rig.trace.for_trial(trial_id)
+            return [flattened(entry) for entry in self.rig.read_trial_trace(trial_id)]
 
     def outcome_of(self, trial_id: int) -> OutcomeReport:
         """The report for one finished trial, built from what it published."""
         return outcome_from_events(trial_id, self.events_for_trial(trial_id))
 
-    # -------------------------------------------------------- the subscription ---
+    # ------------------------------------------------------ the subscription ---
 
-    def stream_url(self) -> str:
-        """Where to watch. `ws(s)` derived from the base URL's scheme."""
-        return self.rig.trace.stream_url(OBSERVER_NAME)
+    def subscribe(self, since_entry_number: int = 0):
+        """Open the subscription. Leaving the context manager is unsubscribing.
 
-    def subscribe(self, timeout_seconds: float | None = None):
-        """Open the subscription, for a caller that wants one opened.
+        A convenience and not a change to the contract: :meth:`finished_trials`
+        still takes events, so the *rule* stays testable with a list of dicts
+        and a caller that owns its own subscription owes this nothing.
 
-        A convenience over :meth:`stream_url` and not a change to the contract:
-        :meth:`finished_trials` still takes messages, so the *rule* stays
-        testable with a list of strings and a caller that owns its own socket
-        owes this nothing. What it buys is that triald no longer has to name a
-        websocket library to do the one thing it does with a rig, which was the
-        last piece of statemachined's API living in this repository.
-
-        Returns a context manager; leaving it is the whole of unsubscribing.
+        **`since_entry_number` is the deadline problem in one argument.** Left
+        at 0 the stream carries everything the far end's ring still holds,
+        which is the right thing for a session that is starting. A session
+        resuming after a reconnect passes the number after the last entry it
+        saw, and nothing is replayed and nothing is missed.
         """
-        return self.rig.trace.subscribe(OBSERVER_NAME, timeout_seconds=timeout_seconds)
+        return self.rig.watch_trace(since_entry_number, observer=OBSERVER_NAME)
 
-    def finished_trials(self, messages: Iterator[str | bytes]) -> Iterator[int]:
+    def finished_trials(self, events: Iterable[TraceEntry | dict[str, Any]]) -> Iterator[int]:
         """The trial ids in a stream of published events, as they finish.
 
-        Takes the messages rather than the socket so that the *rule* -- which
-        event ends a trial, and what a torn stream means -- is testable with a
-        list of strings, and so that the caller owns the connection. Whether it
-        is `websockets`, Starlette's test client or a replay of a log file is not
-        this function's business.
+        Takes the events rather than the subscription so that the *rule* --
+        which event ends a trial -- is testable with a list of dicts, and so
+        that the caller owns the connection. Whether they came off a live
+        stream, a `read_trial_trace` or a replay of a log file is not this
+        function's business, which is why it accepts either the client's type
+        or the flat dict.
 
-        Raises:
-            ExecutorError: if the executor says the subscription lost entries.
-                It is recoverable -- `events_for_trial` fetches any trial by id
-                -- but it must not pass silently: a consumer that believes it
-                saw everything is worse than one that knows it did not.
+        **A gap is not announced and is not detected here.** The executor's
+        ring is bounded, and a subscriber that falls behind sees entry numbers
+        that skip. That is recoverable -- :meth:`events_for_trial` fetches any
+        trial by id -- and detecting it belongs to whoever is holding the
+        subscription open, because only that side knows what it expected next.
         """
         with _refusals_become_executor_errors():
-            yield from published_trials_finishing(messages)
+            for event in events:
+                record = flattened(event) if isinstance(event, TraceEntry) else event
+                if is_a_finished_trial(record) and record.get("trial_id") is not None:
+                    yield int(record["trial_id"])
 
 
 @contextlib.contextmanager
 def _refusals_become_executor_errors():
     """One boundary, one exception, and every message kept.
 
-    `statemachined.client` raises a small hierarchy -- a refusal that names the
-    field to change, a transport error that means the rig said nothing at all --
-    and triald's session loop acts on exactly one thing: this call did not
-    happen. So the distinctions are folded here rather than at each call site,
-    and nothing is thrown away in the folding: the client's message already
-    carries what was being attempted, the daemon's own error code and the field
-    it names, and `__cause__` keeps the original for anybody who wants to branch
-    on it.
+    `statemachined-client` raises a small hierarchy -- a refusal that names the
+    field to change, a silence that means nothing answered at all -- and
+    triald's session loop acts on exactly one thing: this call did not happen.
+    So the distinctions are folded here rather than at each call site, and
+    nothing is thrown away in the folding: the refusal's message already
+    carries the daemon's own error code, the sentence and the field it names,
+    and `__cause__` keeps the original for anybody who wants to branch on it.
     """
     try:
         yield
-    except StatemachinedError as refused:
+    except DaemonRefusedTheRequest as refused:
         raise ExecutorError(str(refused)) from refused

@@ -49,16 +49,17 @@ serve = [
     # the day it is not, and the day it is not is a session. Same move as
     # `vstimd-client` below, same reason.
     #
-    # **The base tier only, which is the whole point of it being tiered.** This
-    # pulls `statemachined.model` and `statemachined.client` -- pydantic, httpx,
-    # websockets -- and nothing else. Not pyserial: triald never opens a serial
-    # port, and `statemachined.device` is what would need one. Not fastapi or
-    # uvicorn: `statemachined[serve]` is the daemon, and triald talks to a
-    # daemon rather than being one. Depending on the distribution named
-    # `statemachined` is not depending on the daemon.
+    # **A distribution of its own, not a tier of the daemon's.** It was
+    # `statemachined` -- the daemon's own package, whose base tier happened to
+    # contain a client -- and taking it meant taking pydantic and that daemon's
+    # document models. `statemachined-client` is generated from
+    # `proto/statemachined/v1/` and its whole dependency list is grpcio and
+    # protobuf, both of which are already here for triald's own API. Not
+    # pyserial: triald never opens a serial port. Not fastapi or uvicorn:
+    # triald talks to a daemon rather than being one.
     #
     # LGPL, so importing it places nothing here under copyleft.
-    "statemachined",
+    "statemachined-client",
 ]
 
 # Adaptive procedures beyond the up/down family in triald.adaptive. Never a hard
@@ -160,12 +161,17 @@ exclude = ["src/triald/_proto"]
 # actually runs the code.
 
 [tool.uv.sources]
-# statemachined's Python package, from its repo, for the same reason vstimd's
+# statemachined's Python client, from its repo, for the same reason vstimd's
 # client is below: it is not on a package registry. `main` rather than a tag
-# while both sides are pre-release -- the client and the API it describes ship
-# from one commit, so a pin here would be a pin to a client older than the
-# daemon it is talking to.
-statemachined = { git = "https://github.com/braemons/statemachined.git", subdirectory = "python", branch = "main" }
+# while both sides are pre-release -- the client and the proto it is generated
+# from ship from one commit, so a pin here would be a pin to a client older
+# than the daemon it is talking to.
+#
+# `client/python`, which is where every daemon in this family keeps its client
+# (contracts/DAEMON_LAYOUT.md). The old pin said `python`, which is the
+# directory that daemon's own package lived in before it became `daemon/` --
+# so it had stopped resolving some time before this.
+statemachined-client = { git = "https://github.com/braemons/statemachined.git", subdirectory = "client/python", branch = "main" }
 
 # vstimd's Python client, from its repo: it is not published to a registry. The
 # pin is the 0.2 branch, which is where the event stream lives — 0.1 is released
