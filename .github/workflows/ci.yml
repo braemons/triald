@@ -19,7 +19,15 @@ jobs:
       - run: uv python install ${{ matrix.python }}
       # The Python project is `daemon/`, beside `client/` and `proto/`
       # (contracts/DAEMON_LAYOUT.md), so every uv command names it.
-      - run: uv sync --directory daemon --group dev --python ${{ matrix.python }}
+      #
+      # **`--extra serve`, because the suite tests the serve tier.** The
+      # servicers, the browser edge and the executor's seam to statemachined are
+      # all behind it, and until now they were reached by accident: `grpcio`
+      # arrived as a dependency of `grpcio-tools` in the dev group, and
+      # `statemachined-client` did not arrive at all — so the executor's tests
+      # failed to import the moment they were written. A suite that covers a
+      # tier should install it rather than hope its dependencies leak in.
+      - run: uv sync --directory daemon --group dev --extra serve --python ${{ matrix.python }}
       - name: Lint
         run: |
           uv run --directory daemon ruff check .
