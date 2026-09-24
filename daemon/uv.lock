@@ -857,7 +857,7 @@ wheels = [
 [[package]]
 name = "statemachined-client"
 version = "0.0.0"
-source = { git = "https://github.com/braemons/statemachined.git?subdirectory=client%2Fpython&branch=main#55250043fca2e41384e0d4970f20a0f9709b3181" }
+source = { git = "https://github.com/braemons/statemachined.git?subdirectory=client%2Fpython&branch=main#09205ba8d208d9c0eb916d1add9727a6744ef1ba" }
 dependencies = [
     { name = "grpcio" },
     { name = "protobuf" },
@@ -909,7 +909,7 @@ dev = [
     { name = "ruff", specifier = ">=0.8" },
     { name = "ty", specifier = ">=0.0.1a1" },
 ]
-stimulus = [{ name = "vstimd-client", git = "https://github.com/braemons/vstimd.git?subdirectory=client%2Fpython&branch=0.2" }]
+stimulus = [{ name = "vstimd-client", git = "https://github.com/braemons/vstimd.git?subdirectory=client%2Fpython&branch=0.3" }]
 
 [[package]]
 name = "ty"
@@ -1011,8 +1011,8 @@ wheels = [
 
 [[package]]
 name = "vstimd-client"
-version = "0.1.0rc3"
-source = { git = "https://github.com/braemons/vstimd.git?subdirectory=client%2Fpython&branch=0.2#cb10799321280dfe6176ed291ae95536b7b85971" }
+version = "0.3.0a1"
+source = { git = "https://github.com/braemons/vstimd.git?subdirectory=client%2Fpython&branch=0.3#47b78687a1bffe6e3d4d44c2385a0a6ea3ea93c3" }
 dependencies = [
     { name = "protobuf" },
     { name = "pyzmq" },

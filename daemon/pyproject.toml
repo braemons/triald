@@ -165,6 +165,6 @@ exclude = ["src/triald/_proto"]
 statemachined-client = { git = "https://github.com/braemons/statemachined.git", subdirectory = "client/python", branch = "main" }
 
 # vstimd's Python client, from its repo: it is not published to a registry. The
-# pin is the 0.2 branch, which is where the event stream lives — 0.1 is released
+# pin is the 0.3 branch, the release this one is tested with — 0.1 is released
 # and has no PUB socket at all.
-vstimd-client = { git = "https://github.com/braemons/vstimd.git", subdirectory = "client/python", branch = "0.2" }
+vstimd-client = { git = "https://github.com/braemons/vstimd.git", subdirectory = "client/python", branch = "0.3" }
