@@ -38,7 +38,7 @@ def main() -> int:
     # Every runtime dependency, imported rather than assumed.
     import google.protobuf
     import grpc
-    import httpx  # noqa: F401
+    import statemachined_client  # noqa: F401  (how the executor reaches statemachined)
     import uvicorn
 
     print(

@@ -69,6 +69,7 @@ COPY README.md LICENSE ./
 COPY daemon/      daemon/
 COPY client/      client/
 COPY dev/         dev/
+COPY docs/        docs/
 COPY packaging/   packaging/
 
 # Declared *here* rather than beside the other ARGs at the top, because an ARG
