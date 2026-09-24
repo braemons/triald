@@ -17,16 +17,23 @@ the same reason it is tested in ``test_session.py``.
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import datetime as dt
 import json
 import struct
 import time
+import urllib.parse
 
+import grpc
 import pytest
+from google.protobuf import json_format
+from google.protobuf.message_factory import GetMessageClass
 
+from triald._proto.triald.v1 import service_pb2
 from triald.api import SessionService, convert, wire
 from triald.api.grpc_server import build_servicers
+from triald.api.servicers.refusals import REFUSAL_METADATA_KEY
 from triald.api.web_edge import build_edge
 from triald.counters import TrialCountCriterion
 from triald.selection import Ordering
@@ -68,6 +75,9 @@ def service() -> SessionService:
         make_store(),
         SessionConfig(initial_set="easy", rounds=4, seed=0),
     )
+
+
+GRPC_WEB = "application/grpc-web+proto"
 
 
 class Enough(Exception):
@@ -125,43 +135,93 @@ def drive(
     return collected
 
 
-class Answer:
-    """One Connect answer, in the shapes a test asks about.
+def _method(rpc: str):
+    """The descriptor of `Service/Method`, which names both message types."""
+    service, method = rpc.split("/")
+    return service_pb2.DESCRIPTOR.services_by_name[service].methods_by_name[method]
 
-    A refusal is a JSON body with a `code` and a `message`; the typed
-    `triald.v1.Error` rides in `details`, so `answer.refusal.error` here is the
-    same field a Python client reads out of trailing metadata over gRPC.
+
+def _as_dict(message) -> dict:
+    return json_format.MessageToDict(
+        message,
+        preserving_proto_field_name=True,
+        always_print_fields_with_no_presence=True,
+    )
+
+
+def _frames(body: bytes) -> list[tuple[int, bytes]]:
+    """A gRPC-Web body, as its (flags, payload) frames."""
+    frames = []
+    while body:
+        flags, length = struct.unpack(">BI", body[:5])
+        frames.append((flags, body[5 : 5 + length]))
+        body = body[5 + length :]
+    return frames
+
+
+class Answer:
+    """One gRPC-Web answer, in the shapes a test asks about.
+
+    The outcome is in the trailer frame, not the HTTP status, which is 200
+    for every call that reached an rpc. `refusal` is the `triald.v1.Error` a
+    Python client reads out of trailing metadata over gRPC: the same key, the
+    same bytes, on a different wire.
     """
+
+    def __init__(self, result: dict, response_type) -> None:
+        self.http_status = result["status"]
+        self.headers = result["headers"]
+        self.message = None
+        self.trailers: dict[str, str] = {}
+        grpc_web = self.headers.get("content-type") == GRPC_WEB
+        for flags, payload in _frames(result["body"]) if grpc_web else ():
+            if flags & 0x80:
+                for line in payload.decode().split("\r\n"):
+                    if line:
+                        key, _, value = line.partition(": ")
+                        self.trailers[key] = value
+            else:
+                self.message = response_type.FromString(payload)
+
+    @property
+    def code(self) -> grpc.StatusCode:
+        number = int(self.trailers.get("grpc-status", "2"))
+        return next(code for code in grpc.StatusCode if code.value[0] == number)
+
+    @property
+    def ok(self) -> bool:
+        return self.code == grpc.StatusCode.OK
+
+    @property
+    def detail(self) -> str:
+        return urllib.parse.unquote(self.trailers.get("grpc-message", ""))
+
+    @property
+    def json(self) -> dict:
+        """The answer as protobuf's JSON mapping, for readable assertions.
+
+        JSON exists only here, in the test: what crossed the wire was binary.
+        """
+        assert self.message is not None, f"{self.code}: {self.detail}"
+        return _as_dict(self.message)
+
+    @property
+    def refusal(self):
+        from triald._proto.triald.v1 import common_pb2
+
+        encoded = self.trailers[REFUSAL_METADATA_KEY]
+        return common_pb2.Error.FromString(
+            base64.b64decode(encoded + "=" * (-len(encoded) % 4))
+        )
+
+
+class Page:
+    """A panel file: plain HTTP, not an rpc."""
 
     def __init__(self, result: dict) -> None:
         self.status = result["status"]
         self.headers = result["headers"]
-        self.body = result["body"]
         self.text = result["body"].decode("utf-8", "replace")
-
-    @property
-    def json(self) -> dict:
-        """The body as JSON — lazily, because `get` also fetches panels."""
-        return json.loads(self.text) if self.text else {}
-
-    @property
-    def code(self) -> str:
-        return self.json.get("code", "")
-
-    @property
-    def detail(self) -> str:
-        return self.json.get("message", "")
-
-    @property
-    def refusal(self):
-        import base64
-
-        from triald._proto.triald.v1 import common_pb2
-
-        encoded = self.json["details"][0]["value"]
-        return common_pb2.Error.FromString(
-            base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
-        )
 
 
 class Edge:
@@ -171,16 +231,20 @@ class Edge:
         self.app = app
         self.loop = loop
 
+    def _request(self, rpc: str, body: dict | None) -> bytes:
+        request = GetMessageClass(_method(rpc).input_type)()
+        json_format.ParseDict(body or {}, request)
+        payload = request.SerializeToString()
+        return struct.pack(">BI", 0, len(payload)) + payload
+
     def call(self, rpc: str, body: dict | None = None) -> Answer:
+        return self.send(rpc, self._request(rpc, body))
+
+    def send(self, rpc: str, enveloped: bytes, content_type=GRPC_WEB) -> Answer:
+        """Bytes as they are, for the tests about what the wire refuses."""
         return Answer(
-            drive(
-                self.loop,
-                self.app,
-                "POST",
-                f"/triald.v1.{rpc}",
-                json.dumps(body or {}).encode(),
-                "application/json",
-            )
+            drive(self.loop, self.app, "POST", f"/triald.v1.{rpc}", enveloped, content_type),
+            GetMessageClass(_method(rpc).output_type),
         )
 
     def settle(self, seconds: float) -> None:
@@ -193,27 +257,22 @@ class Edge:
         """
         self.loop.run_until_complete(asyncio.sleep(seconds))
 
-    def get(self, path: str) -> Answer:
-        return Answer(drive(self.loop, self.app, "GET", path))
+    def get(self, path: str) -> Page:
+        return Page(drive(self.loop, self.app, "GET", path))
 
     def stream(self, rpc: str, how_many: int, body: dict | None = None) -> list[dict]:
-        """The first `how_many` frames of a server stream.
-
-        Each is enveloped — a flag byte, a big-endian length, the message — and
-        so is the request, which is the one asymmetry worth remembering about
-        the Connect streaming protocol.
-        """
-        payload = json.dumps(body or {}).encode()
+        """The first `how_many` frames of a server stream, each one a message."""
         result = drive(
             self.loop,
             self.app,
             "POST",
             f"/triald.v1.{rpc}",
-            struct.pack(">BI", 0, len(payload)) + payload,
-            "application/connect+json",
+            self._request(rpc, body),
+            GRPC_WEB,
             frames=how_many,
         )
-        return [json.loads(frame[5:]) for frame in result["frames"]]
+        message_type = GetMessageClass(_method(rpc).output_type)
+        return [_as_dict(message_type.FromString(frame[5:])) for frame in result["frames"]]
 
 
 @pytest.fixture
@@ -232,14 +291,14 @@ def edge(service: SessionService) -> Edge:
 def next_trial(edge: Edge) -> int:
     """Select a trial and give its number, which its outcome has to carry."""
     answer = edge.call("Trial/Next")
-    assert answer.status == 200, answer.text
+    assert answer.ok, answer.detail
     # A 64-bit number is a string on the wire; the tests do arithmetic on it.
     return int(answer.json["trial_number"])
 
 
 def arm(edge: Edge) -> dict:
     answer = edge.call("Session/Arm")
-    assert answer.status == 200, answer.text
+    assert answer.ok, answer.detail
     return answer.json
 
 
@@ -268,14 +327,14 @@ def test_arming_publishes_a_full_snapshot(edge: Edge):
 def test_arming_twice_is_refused_while_one_runs(edge: Edge):
     arm(edge)
     response = edge.call("Session/Arm")
-    assert response.status == 412  # failed_precondition
+    assert response.code == grpc.StatusCode.FAILED_PRECONDITION
     assert response.refusal.error == "session"
     assert "already running" in response.detail
 
 
 def test_the_trial_loop_refuses_to_run_unarmed(edge: Edge):
     response = edge.call("Trial/Next")
-    assert response.status == 412  # failed_precondition
+    assert response.code == grpc.StatusCode.FAILED_PRECONDITION
     assert "arm it first" in response.detail
 
 
@@ -312,7 +371,7 @@ def test_an_outcome_for_another_trial_is_refused(edge: Edge):
     trial = next_trial(edge)
 
     response = edge.call("Trial/ReportOutcome", {"trial_id": trial - 1, "outcome": "HIT"})
-    assert response.status == 412  # failed_precondition
+    assert response.code == grpc.StatusCode.FAILED_PRECONDITION
     assert f"trial {trial} is the one in flight" in response.detail
 
     # And it says so by *name*, not only in the sentence. This is the one
@@ -334,8 +393,8 @@ def test_an_outcome_without_a_trial_id_is_refused(edge: Edge):
     next_trial(edge)
 
     response = edge.call("Trial/ReportOutcome", {"outcome": "HIT"})
-    assert response.status == 400  # invalid_argument
-    assert "trial_id" in response.text
+    assert response.code == grpc.StatusCode.INVALID_ARGUMENT
+    assert "trial_id" in response.detail
 
 
 def test_the_trial_cap_reaches_the_wire_and_shows_on_the_trial(edge: Edge):
@@ -395,16 +454,17 @@ def test_the_watchdog_expires_a_trial_nobody_answers(edge: Edge):
     assert state["running"] is True
 
 
-def test_an_unknown_outcome_name_is_refused_with_the_alternatives(edge: Edge):
+def test_an_outcome_this_build_does_not_know_is_refused_by_name(edge: Edge):
+    """An open enum carries any number on the binary wire, so a newer client's
+    outcome reaches an older daemon as a bare integer. Refused, naming the
+    field and the enum, rather than crashing the conversion."""
     arm(edge)
     trial = next_trial(edge)
-    response = edge.call("Trial/ReportOutcome", {"trial_id": trial, "outcome": "SPLENDID"})
-    assert response.status == 400  # invalid_argument
-    # The refusal names the field and the enum type rather than listing every
-    # valid value, which is what protobuf's parser says. The values themselves
-    # are one fetch away, in proto/braemons/v1/trial_outcome.proto.
-    assert "outcome" in response.detail
+    response = edge.call("Trial/ReportOutcome", {"trial_id": trial, "outcome": 999})
+    assert response.code == grpc.StatusCode.INVALID_ARGUMENT
+    assert "outcome 999" in response.detail
     assert "TrialOutcome" in response.detail
+    assert response.refusal.error == "request"
 
 
 def test_two_selections_without_a_result_are_refused(edge: Edge):
@@ -412,7 +472,7 @@ def test_two_selections_without_a_result_are_refused(edge: Edge):
     arm(edge)
     edge.call("Trial/Next")
     response = edge.call("Trial/Next")
-    assert response.status == 412  # failed_precondition
+    assert response.code == grpc.StatusCode.FAILED_PRECONDITION
     assert "still in flight" in response.detail
 
 
@@ -473,7 +533,7 @@ def test_stepping_is_refused_with_a_trial_in_flight(edge: Edge):
     arm(edge)
     edge.call("Trial/Next")
     response = edge.call("Debug/Step", {"trials": 1})
-    assert response.status == 412  # failed_precondition
+    assert response.code == grpc.StatusCode.FAILED_PRECONDITION
     assert "in flight" in response.detail
 
 
@@ -543,14 +603,14 @@ def test_every_ordering_is_accepted_on_the_wire(edge: Edge):
         # another language agrees about the same byte.
         on_the_wire = f"ORDERING_{ordering.name}"
         response = edge.call("Config/PatchConfig", {"ordering": on_the_wire})
-        assert response.status == 200, ordering
+        assert response.ok, ordering
         assert response.json["config"]["ordering"] == on_the_wire
 
 
 def test_an_arm_time_setting_is_refused_while_running(edge: Edge):
     arm(edge)
     response = edge.call("Config/PatchConfig", {"extend_trial_type_number": True})
-    assert response.status == 400
+    assert response.code == grpc.StatusCode.INVALID_ARGUMENT
     assert "cannot change while the session is running" in response.detail
 
 
@@ -582,10 +642,24 @@ def test_the_stop_rule_ends_the_session(edge: Edge):
     assert "12 all trials counted" in result["stop_reason"]
 
 
-def test_an_unknown_config_field_is_refused_by_name(edge: Edge):
-    response = edge.call("Config/PatchConfig", {"rounds_of_applause": 3})
-    assert response.status == 400  # invalid_argument
-    assert "rounds_of_applause" in response.text
+def test_json_is_not_spoken(edge: Edge):
+    """Protobuf on every wire (`contracts/DAEMON_LAYOUT.md`): a JSON request
+    is not a gRPC-Web request, and is refused before any rpc sees it."""
+    response = edge.send("State/ReadState", b"{}", content_type="application/json")
+    assert response.http_status == 415
+
+
+def test_a_frame_that_lies_about_its_length_is_refused(edge: Edge):
+    response = edge.send("State/ReadState", struct.pack(">BI", 0, 10) + b"\x08")
+    assert response.code == grpc.StatusCode.INVALID_ARGUMENT
+    assert "10 bytes" in response.detail
+
+
+def test_an_rpc_that_does_not_exist_is_unimplemented(edge: Edge):
+    answer = Answer(
+        drive(edge.loop, edge.app, "POST", "/triald.v1.State/Nope", b"", GRPC_WEB), None
+    )
+    assert answer.code == grpc.StatusCode.UNIMPLEMENTED
 
 
 def test_resetting_counters_clears_the_tallies_but_not_the_bag(edge: Edge):
@@ -629,7 +703,7 @@ def test_a_broken_switch_chain_is_reported_before_anybody_starts(edge: Edge):
     assert "not in the store" in body["chain_problem"]
 
     response = edge.call("Session/Arm")
-    assert response.status == 400
+    assert response.code == grpc.StatusCode.INVALID_ARGUMENT
     assert "unusable" in response.detail
 
 
@@ -644,7 +718,7 @@ def test_a_set_can_be_loaded_by_hand(edge: Edge):
 
 def test_the_loaded_set_cannot_be_deleted(edge: Edge):
     response = edge.call("SetStore/DeleteSet", {"name": "easy"})
-    assert response.status == 412  # failed_precondition
+    assert response.code == grpc.StatusCode.FAILED_PRECONDITION
     assert "load another first" in response.detail
 
 
@@ -708,7 +782,7 @@ def test_the_path_and_the_body_have_to_agree_about_the_name(edge: Edge):
     response = edge.call(
         "SetStore/WriteSet", {"name": "easy", "set": {"name": "hard", "trial_types": []}}
     )
-    assert response.status == 400
+    assert response.code == grpc.StatusCode.INVALID_ARGUMENT
     assert "renaming a set is a delete and a write" in response.detail
 
 
@@ -721,7 +795,7 @@ def test_the_active_set_may_not_be_emptied_mid_session(edge: Edge):
             "set": {"name": "easy", "trial_types": [{"name": "easy_a", "trials_per_round": 0}]},
         },
     )
-    assert response.status == 400
+    assert response.code == grpc.StatusCode.INVALID_ARGUMENT
     assert "a round would be empty" in response.detail
 
 
@@ -766,7 +840,7 @@ def test_a_policy_that_raises_is_reported_rather_than_loaded(edge: Edge):
     assert "select_trial" in check["diagnostics"][0]["message"]
 
     response = edge.call("Policy/LoadPolicy", {"name": "boom", "source": source})
-    assert response.status == 400
+    assert response.code == grpc.StatusCode.INVALID_ARGUMENT
     assert edge.call("Policy/ReadPolicy").json["origin"] == "POLICY_ORIGIN_DEFAULT"
 
 
@@ -787,7 +861,7 @@ def test_a_loaded_policy_drives_the_selection(edge: Edge, service: SessionServic
 def test_a_policy_cannot_be_swapped_mid_session(edge: Edge):
     arm(edge)
     response = edge.call("Policy/LoadPolicy", {"name": "p", "source": GOOD_POLICY})
-    assert response.status == 412  # failed_precondition
+    assert response.code == grpc.StatusCode.FAILED_PRECONDITION
     assert "stop it before loading" in response.detail
 
 

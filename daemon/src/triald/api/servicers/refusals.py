@@ -97,13 +97,13 @@ async def answering[T](
 # `NotImplementedError` under protobuf's upb runtime, which is the default one
 # everywhere, so the check was a crash rather than a refusal.
 #
-# What is true instead:
+# What is true instead: **unknown fields are ignored**, because protobuf ignores
+# them. A client newer than this daemon sends a field this build has never
+# heard of and the daemon proceeds without it. That is protobuf's design and no
+# daemon in this family can opt out of it, which is worth knowing rather than
+# papering over. (The browser edge used to take JSON too, whose parser did
+# refuse them by name; it speaks binary gRPC-Web now, like every other wire.)
 #
-# * **The JSON codec does refuse them**, by name, in `json_format.Parse`. That
-#   is the path a hand-written request arrives on — a panel, a script, a person
-#   with a terminal — and it is where the mistake §11 is about actually gets
-#   made.
-# * **The binary codec ignores them**, because protobuf ignores them. A client
-#   newer than this daemon sends a field this build has never heard of and the
-#   daemon proceeds without it. That is protobuf's design and no daemon in this
-#   family can opt out of it, which is worth knowing rather than papering over.
+# An unknown *enum number* is different: it is a value, not a field, and a
+# servicer that converts it into a domain enum refuses it by name rather than
+# letting the conversion crash (trial_servicer.py, `ReportOutcome`).

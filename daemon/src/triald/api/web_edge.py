@@ -1,24 +1,29 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The browser's way in: the panels, and the Connect protocol over them.
+"""The browser's way in: the panels, and gRPC-Web over them.
 
 **A browser cannot speak gRPC.** It has no access to HTTP trailers and no
-control over HTTP/2 framing, which is why gRPC-Web and Connect exist at all.
-Rust solves this in-process with `tonic-web`; Python has no maintained
-equivalent — `sonora` was last released in 2023 — and the one live option,
-`connectrpc`, brings a second protobuf runtime with it. So this is written
-here, against the protocol specification, and it is small because the Connect
-protocol is small:
+control over HTTP/2 framing, which is why gRPC-Web exists at all. Rust solves
+this in-process with `tonic-web`, and statemachined and mousewheeld do; Python
+has no maintained equivalent — `sonora` was last released in 2023 — so this is
+written here, against the protocol specification, and it is small because
+gRPC-Web is small:
 
-* **A unary call is an HTTP POST.** The body is the bare message; the answer is
-  the bare message; an error is a JSON object with a status code. No framing,
-  no trailers, no HTTP/2.
-* **A server-streaming call** is the same POST, answering with enveloped
-  frames — one flag byte, four length bytes, the message — and a final frame
-  whose flag bit says "end of stream" and which carries the error if there was
-  one. Still no trailers.
+* **Every call is an HTTP POST** whose body is one enveloped message — a flag
+  byte, a big-endian length, the protobuf bytes.
+* **The answer is the same envelope**, once for a unary call and once per frame
+  for a stream, followed by a *trailer frame*: flag bit 7 set, and the trailers
+  gRPC would have sent as HTTP/2 trailers written out as header lines. The
+  status, the message and the typed refusal ride there, so an error is
+  protobuf like everything else.
 
 That is the whole protocol surface a browser needs, and it is why this file is
 short enough to own.
+
+**Protobuf only.** This edge used to speak the Connect protocol, which also
+takes JSON, and the panels sent JSON because that is the Connect transport's
+default. `contracts/DAEMON_LAYOUT.md` says every wire in the family carries
+protobuf, and gRPC-Web has no JSON codec to fall back to — the same transport
+the other daemons' panels use, so one browser client shape serves all three.
 
 **Nothing here knows what a trial is.** It dispatches by descriptor into the
 same servicers `grpc_server.py` registers, so the two transports cannot drift:
@@ -30,45 +35,32 @@ edge, and a rig with no browser on it loses nothing by never starting it.
 from __future__ import annotations
 
 import base64
-import json
 import logging
 import struct
 from collections.abc import Callable
 from pathlib import Path
 
 import grpc
-from google.protobuf import json_format
-from google.protobuf.message import Message
+from google.protobuf.message import DecodeError, Message
 from google.protobuf.message_factory import GetMessageClass
 
 from triald._proto.triald.v1 import (
     service_pb2,
 )
 from triald.api.service import SessionService
-from triald.api.servicers.refusals import REFUSAL_METADATA_KEY
 
 log = logging.getLogger(__name__)
 
-#: The Connect content types this edge accepts. Binary for the panels, JSON so
-#: that a person debugging can read a request in the network tab.
-_UNARY_CODECS = {"application/proto": "proto", "application/json": "json"}
-_STREAM_CODECS = {"application/connect+proto": "proto", "application/connect+json": "json"}
+#: What a gRPC-Web client sends, and what this edge answers with. The bare
+#: `application/grpc-web` means the same binary codec; `+text` (base64 bodies,
+#: for browsers without binary fetch) is not served, because none that runs the
+#: panels lacks it.
+_REQUEST_CONTENT_TYPES = {"application/grpc-web", "application/grpc-web+proto"}
+_CONTENT_TYPE = b"application/grpc-web+proto"
 
-#: `EndStreamResponse` is flagged, not framed differently: bit 1 of the flag
-#: byte. Bit 0 would mean the message is compressed, which this never does.
-_END_OF_STREAM = 0b10
-
-#: gRPC's codes, as Connect spells them and as HTTP answers them. Connect uses
-#: the same names gRPC does, which is the point of it.
-_CONNECT_CODE = {
-    grpc.StatusCode.INVALID_ARGUMENT: ("invalid_argument", 400),
-    grpc.StatusCode.NOT_FOUND: ("not_found", 404),
-    grpc.StatusCode.FAILED_PRECONDITION: ("failed_precondition", 412),
-    grpc.StatusCode.UNIMPLEMENTED: ("unimplemented", 501),
-    grpc.StatusCode.UNAVAILABLE: ("unavailable", 503),
-    grpc.StatusCode.INTERNAL: ("internal", 500),
-    grpc.StatusCode.UNKNOWN: ("unknown", 500),
-}
+#: Bit 7 of the flag byte marks the trailer frame. Bit 0 would mean the message
+#: is compressed, which this never does.
+_TRAILER = 0x80
 
 
 class Aborted(Exception):
@@ -104,7 +96,7 @@ class Rpc:
 
 
 def rpcs_of(servicers: dict[str, object]) -> dict[str, Rpc]:
-    """Every rpc in the proto, by the path Connect addresses it at.
+    """Every rpc in the proto, by the path gRPC addresses it at.
 
     Built from the descriptor rather than written out: the path is
     `/triald.v1.Session/Arm`, the request type comes from the descriptor, and
@@ -127,64 +119,59 @@ def rpcs_of(servicers: dict[str, object]) -> dict[str, Rpc]:
 # -- the protocol ---------------------------------------------------------------
 
 
-def _decode(rpc: Rpc, codec: str, body: bytes) -> Message:
-    message = rpc.request_type()
-    if codec == "json":
-        # Strict, as §11 requires of a request: an unknown field is refused by
-        # name here, before a servicer sees it. The binary path cannot do that
-        # in the parser, which is why the servicers ask separately.
-        json_format.Parse(body or b"{}", message, ignore_unknown_fields=False)
-    else:
-        message.ParseFromString(body)
-    return message
-
-
-def _encode(codec: str, message: Message) -> bytes:
-    if codec == "json":
-        return json_format.MessageToJson(
-            message,
-            always_print_fields_with_no_presence=True,
-            preserving_proto_field_name=False,
-            use_integers_for_enums=False,
-        ).encode()
-    return message.SerializeToString()
-
-
 def _envelope(flags: int, payload: bytes) -> bytes:
-    """One frame of a Connect stream: a flag byte, a big-endian length, the body."""
+    """One gRPC-Web frame: a flag byte, a big-endian length, the body."""
     return struct.pack(">BI", flags, len(payload)) + payload
 
 
-def _error_body(problem: Aborted) -> tuple[bytes, int]:
-    """A Connect error, and the HTTP status that carries it.
+def _percent_encoded(detail: str) -> str:
+    """`grpc-message` as the gRPC spec writes it: printable ASCII but `%` as
+    itself, every other byte of the UTF-8 as `%XX`."""
+    return "".join(
+        chr(byte) if 0x20 <= byte <= 0x7E and byte != 0x25 else f"%{byte:02X}"
+        for byte in detail.encode()
+    )
 
-    The typed refusal goes in `details` rather than being dropped: this is the
-    same `triald.v1.Error` the gRPC transport puts in trailing metadata, so a
-    browser and a Python client read the same three fields and neither has to
-    parse a sentence.
+
+def _trailers(
+    code: grpc.StatusCode = grpc.StatusCode.OK, detail: str = "", metadata=None
+) -> bytes:
+    """The trailer frame: what HTTP/2 trailers would have carried.
+
+    The typed refusal goes in under the same `-bin` key the gRPC transport
+    uses, so a browser and a Python client read the same `triald.v1.Error` from
+    the same place and neither has to parse a sentence. A `-bin` value is
+    base64 on this wire, unpadded as gRPC writes it.
     """
-    code, status = _CONNECT_CODE.get(problem.code, ("unknown", 500))
-    body: dict = {"code": code, "message": problem.detail}
-    refusal = problem.metadata.get(REFUSAL_METADATA_KEY)
-    if refusal is not None:
-        # Padded: this is `google.protobuf.Any` in JSON, which is standard
-        # base64. gRPC-Web's unpadded `-bin` metadata is a different rule on a
-        # different transport, and the browser client here reads this one.
-        body["details"] = [
-            {"type": "triald.v1.Error", "value": base64.b64encode(refusal).decode()}
-        ]
-    return json.dumps(body).encode(), status
+    lines = [f"grpc-status: {code.value[0]}"]
+    if detail:
+        lines.append(f"grpc-message: {_percent_encoded(detail)}")
+    for key, value in (metadata or {}).items():
+        if key.endswith("-bin"):
+            value = base64.b64encode(value).decode().rstrip("=")
+        lines.append(f"{key}: {value}")
+    return _envelope(_TRAILER, "".join(f"{line}\r\n" for line in lines).encode())
+
+
+def _decode(rpc: Rpc, body: bytes) -> Message:
+    """The one message a gRPC-Web request carries, out of its envelope."""
+    if len(body) < 5:
+        raise DecodeError("the request is not an enveloped message")
+    flags, length = struct.unpack(">BI", body[:5])
+    if flags & 1:
+        raise DecodeError("the request is compressed, which this edge does not accept")
+    if len(body) - 5 != length:
+        raise DecodeError(f"the envelope says {length} bytes and carries {len(body) - 5}")
+    return rpc.request_type.FromString(body[5:])
 
 
 async def _send(send, status: int, content_type: str, body: bytes) -> None:
+    """A plain HTTP answer: the panels, a preflight, a request that is not gRPC-Web."""
     await send(
         {
             "type": "http.response.start",
             "status": status,
-            "headers": [
-                (b"content-type", content_type.encode()),
-                *(_CORS_HEADERS),
-            ],
+            "headers": [(b"content-type", content_type.encode()), *_CORS_HEADERS],
         }
     )
     await send({"type": "http.response.body", "body": body})
@@ -199,72 +186,51 @@ async def _read_body(receive) -> bytes:
             return body
 
 
-async def _call_unary(rpc: Rpc, codec: str, body: bytes, send) -> None:
-    try:
-        answer = await rpc.handler(_decode(rpc, codec, body), EdgeContext())
-    except Aborted as problem:
-        payload, status = _error_body(problem)
-        return await _send(send, status, "application/json", payload)
-    except json_format.ParseError as problem:
-        return await _send(
-            send,
-            400,
-            "application/json",
-            json.dumps({"code": "invalid_argument", "message": str(problem)}).encode(),
-        )
-    await _send(send, 200, f"application/{codec}", _encode(codec, answer))
-
-
-async def _call_streaming(rpc: Rpc, codec: str, body: bytes, send, receive) -> None:
-    """A server stream: 200 immediately, frames as they come, an end frame last.
-
-    The status is sent before anything is known about how the call will go,
-    which is the protocol's own rule and the reason the end frame carries the
-    error: by the time a stream fails, the status line is long gone.
-    """
-    content_type = f"application/connect+{codec}"
-    try:
-        request = _decode(rpc, codec, body)
-    except json_format.ParseError as problem:
-        return await _send(
-            send,
-            400,
-            "application/json",
-            json.dumps({"code": "invalid_argument", "message": str(problem)}).encode(),
-        )
-
+async def _start(send) -> None:
     await send(
         {
             "type": "http.response.start",
             "status": 200,
-            "headers": [(b"content-type", content_type.encode()), *_CORS_HEADERS],
+            "headers": [(b"content-type", _CONTENT_TYPE), *_CORS_HEADERS],
         }
     )
 
-    end: dict = {}
+
+async def _frame(send, payload: bytes, *, more: bool = True) -> None:
+    await send({"type": "http.response.body", "body": payload, "more_body": more})
+
+
+async def _call(rpc: Rpc, body: bytes, send) -> None:
+    """One call, unary or streaming: 200, the frames, the trailers.
+
+    The status line goes out before anything is known about how the call will
+    go, which is the protocol's own rule and the reason the trailers carry the
+    outcome: by the time a stream fails, the status line is long gone. A unary
+    call is the same shape with one frame, so there is one path for both.
+    """
+    await _start(send)
     try:
-        async for frame in rpc.handler(request, EdgeContext()):
-            await send(
-                {
-                    "type": "http.response.body",
-                    "body": _envelope(0, _encode(codec, frame)),
-                    "more_body": True,
-                }
-            )
+        request = _decode(rpc, body)
+    except DecodeError as problem:
+        return await _frame(
+            send, _trailers(grpc.StatusCode.INVALID_ARGUMENT, str(problem)), more=False
+        )
+    try:
+        if rpc.streaming:
+            async for answer in rpc.handler(request, EdgeContext()):
+                await _frame(send, _envelope(0, answer.SerializeToString()))
+        else:
+            answer = await rpc.handler(request, EdgeContext())
+            await _frame(send, _envelope(0, answer.SerializeToString()))
     except Aborted as problem:
-        code, _status = _CONNECT_CODE.get(problem.code, ("unknown", 500))
-        end = {"error": {"code": code, "message": problem.detail}}
+        return await _frame(
+            send, _trailers(problem.code, problem.detail, problem.metadata), more=False
+        )
     except (ConnectionResetError, BrokenPipeError):
         # The browser navigated away mid-stream. Not a failure of anything,
         # and nothing left to send it.
         return
-    await send(
-        {
-            "type": "http.response.body",
-            "body": _envelope(_END_OF_STREAM, json.dumps(end).encode()),
-            "more_body": False,
-        }
-    )
+    await _frame(send, _trailers(), more=False)
 
 
 # -- the panels -----------------------------------------------------------------
@@ -353,39 +319,27 @@ def build_edge(service: SessionService, servicers: dict[str, object]):
             return await _send(send, 204, "text/plain", b"")
 
         if method == "POST":
-            rpc = table.get(path)
-            if rpc is None:
-                return await _send(
-                    send,
-                    404,
-                    "application/json",
-                    json.dumps(
-                        {"code": "unimplemented", "message": f"no rpc at {path}"}
-                    ).encode(),
-                )
             content_type = _header(scope, b"content-type").split(";")[0].strip()
-            codecs = _STREAM_CODECS if rpc.streaming else _UNARY_CODECS
-            codec = codecs.get(content_type)
-            if codec is None:
+            if content_type not in _REQUEST_CONTENT_TYPES:
+                # Not a gRPC-Web client at all, so an HTTP status is the only
+                # answer it can read.
                 return await _send(
                     send,
                     415,
-                    "application/json",
-                    json.dumps(
-                        {
-                            "code": "invalid_argument",
-                            "message": f"{content_type or 'no content type'} is not one of "
-                            f"{sorted(codecs)}",
-                        }
-                    ).encode(),
+                    "text/plain",
+                    f"{content_type or 'no content type'} is not one of "
+                    f"{sorted(_REQUEST_CONTENT_TYPES)}".encode(),
                 )
+            rpc = table.get(path)
             body = await _read_body(receive)
-            if rpc.streaming:
-                # The request message of a stream is enveloped like a response
-                # frame: strip the five-byte header before parsing it.
-                body = body[5:] if len(body) >= 5 else b""
-                return await _call_streaming(rpc, codec, body, send, receive)
-            return await _call_unary(rpc, codec, body, send)
+            if rpc is None:
+                await _start(send)
+                return await _frame(
+                    send,
+                    _trailers(grpc.StatusCode.UNIMPLEMENTED, f"no rpc at {path}"),
+                    more=False,
+                )
+            return await _call(rpc, body, send)
 
         if method == "GET":
             relative = "index.html" if path == "/" else path.lstrip("/")

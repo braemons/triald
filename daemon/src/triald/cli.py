@@ -12,7 +12,7 @@ Three things matter here and none of them is the daemon itself:
   policy and shows which decisions changed.
 
 ``triald serve`` is the fourth, and is the daemon: it brings up the gRPC API,
-the browser edge that speaks Connect, and the web UI written against it. It
+the browser edge that speaks gRPC-Web, and the web UI written against it. It
 needs the ``serve`` extra, which the rest of this module deliberately does not.
 """
 

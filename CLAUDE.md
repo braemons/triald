@@ -173,7 +173,7 @@ Roughly in dependency order — nothing later is imported by anything earlier.
 | `api/service.py` | One rig's session — the rules about *when* something may be done |
 | `api/servicers/` | One module per service in `proto/triald/v1/service.proto` |
 | `api/grpc_server.py` | The daemon's own port: `grpc.aio`, for clients and CLIs |
-| `api/web_edge.py` | The browser's way in: the Connect protocol, and the panels |
+| `api/web_edge.py` | The browser's way in: gRPC-Web (binary), and the panels |
 | `client/web/` | The panels. A sibling of `daemon/`, with a build step whose output is committed |
 
 `api/` needs the `serve` extra; everything above it imports nothing at all,
@@ -199,7 +199,7 @@ be answering the wrong question. The interface is not a transport: it is the one
 written-down description of what this daemon accepts and what it answers, and
 `proto/triald/v1/` is a description that generates every client instead of being
 restated in each one. There is no `curl` half any more, and none is wanted —
-there are clients and CLIs, and a browser reaches the same rpcs over Connect.
+there are clients and CLIs, and a browser reaches the same rpcs over gRPC-Web.
 
 **The interface comes before the clients.** `proto/triald/v1/` carries the types
 *and* the behaviours: what each rpc refuses, and with which code. `api/convert/`

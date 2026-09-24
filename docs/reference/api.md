@@ -16,14 +16,17 @@ triald serve                                  # 127.0.0.1:8420, demo experiment
 triald serve --port 8080 --results-dir ~/data --policy staircase.py
 ```
 
-The **browser edge** listens on the port beside it and speaks the **Connect
-protocol**, which is gRPC's semantics over plain HTTP: a browser has no access
-to trailers and no control over HTTP/2 framing, so it cannot speak gRPC itself.
+The **browser edge** listens on the port beside it and speaks **gRPC-Web**,
+binary only — gRPC's framing with the trailers moved into the body, because a
+browser has no access to trailers and no control over HTTP/2 framing, so it
+cannot speak gRPC itself. It is the transport statemachined's and mousewheeld's
+panels use, and it has no JSON codec: protobuf on every wire, as
+`contracts/DAEMON_LAYOUT.md` requires.
 The edge dispatches into the same servicers by descriptor, so the two transports
 cannot drift — an rpc implemented once is reachable from both, and a rig with no
 browser on it loses nothing by never starting the edge.
-`daemon/src/triald/api/web_edge.py` is the whole of it; it is short because the
-Connect protocol is small.
+`daemon/src/triald/api/web_edge.py` is the whole of it; it is short because
+gRPC-Web is small.
 
 **One daemon, one session.** No call carries a session id. That matches
 one-daemon-per-rig; cross-rig aggregation is a separate tool's job.
@@ -120,9 +123,9 @@ The category is not the whole refusal, so the refusal also travels as itself.
 `detail` is one sentence for a person, because it usually is read by one. A UI
 that renders only `FAILED_PRECONDITION` throws away the useful half.
 
-Over Connect the same message rides in the error's `details` array, as
-`google.protobuf.Any`, so the browser reads the identical three fields without a
-second refusal format existing. `api/servicers/refusals.py` is the single place
+Over gRPC-Web the same entry rides in the trailer frame, base64 as every
+`-bin` value there is, so the browser reads the identical three fields from the
+identical key without a second refusal format existing. `api/servicers/refusals.py` is the single place
 a `ServiceError` becomes a status.
 
 ---
@@ -136,7 +139,7 @@ a `ServiceError` becomes a status.
    │          │  ◀──────────────────  │                  │
    └──────────┘        outcome        └──────────────────┘
         │
-        │  gRPC · Connect
+        │  gRPC · gRPC-Web
         ▼
    web UI · Python · MATLAB · Bonsai
 ```
@@ -347,7 +350,7 @@ is a failing test rather than a discovery six months later.
 
 The two were asserted byte-identical while the wire *was* the record model.
 They are two shapes now and the test says so: the record keeps `+00:00` and
-plain integers, and the wire is protobuf's JSON mapping — RFC 3339 with a `Z`,
+plain integers, and the wire message in protobuf's JSON mapping is RFC 3339 with a `Z`,
 and a 64-bit number as a string, because JSON's number cannot hold one
 faithfully. The record format is the one with years of files behind it and did
 not move.

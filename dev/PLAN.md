@@ -622,7 +622,7 @@ The interface is `proto/triald/v1/`; [`docs/reference/api.md`](../docs/reference
 is the same thing for a person. `Environment` and `Records` are still
 **planned**, and the config-file shapes still want types of their own.
 
-**One transport: gRPC**, with the browser edge speaking Connect on the port
+**One transport: gRPC**, with the browser edge speaking gRPC-Web on the port
 beside it. The web UI and all three clients use the identical rpcs — there is no
 mirroring layer.
 
@@ -1117,7 +1117,8 @@ imported by triald, avoids reimplementing the binary reader entirely.
    `proto/triald/v1/`. Outstanding: the config-file shapes, and retiring
    `state.py`'s `as_dict()` methods.
 3. ~~The API, plus policy upload and storage~~ — **done**, as gRPC with a
-   Connect edge for the browser
+   gRPC-Web edge for the browser (Connect until 0.3, whose JSON default the
+   panels were using)
 4. ~~Web interface, session view~~ — **done**, on a generated client
 5. Session and rig config files, and the VStim importer
 6. Python client, then MATLAB, then Bonsai

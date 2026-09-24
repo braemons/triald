@@ -57,6 +57,18 @@ class TrialServicer(service_pb2_grpc.TrialServicer):
                     kind="request",
                     refusal=Refusal.BAD_REQUEST,
                 )
+            # An open enum carries any number on the binary wire, including
+            # ones this build has never heard of. Refused by name here rather
+            # than left to crash the conversion below.
+            for field in ("outcome", "manipulandum"):
+                enum = request.DESCRIPTOR.fields_by_name[field].enum_type
+                value = getattr(request, field)
+                if value not in enum.values_by_number:
+                    raise ServiceError(
+                        f"{field} {value} is not a value of {enum.full_name}",
+                        kind="request",
+                        refusal=Refusal.BAD_REQUEST,
+                    )
             async with self.service.publishing():
                 record = self.service.report_outcome(
                     convert.outcome_report_from_wire(request), trial_id=request.trial_id

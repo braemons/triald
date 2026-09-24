@@ -2,17 +2,17 @@
 //
 // The one place in this UI that knows a network exists.
 //
-// It speaks the **Connect protocol** to the eight services in
-// `proto/triald/v1/`, over the same port the panels themselves are served
-// from — `daemon/src/triald/api/web_edge.py` answers it in the daemon, so
-// there is no proxy to deploy and nothing to configure.
+// It speaks **gRPC-Web, binary** to the eight services in `proto/triald/v1/`,
+// over the same port the panels themselves are served from —
+// `daemon/src/triald/api/web_edge.py` answers it in the daemon, so there is no
+// proxy to deploy and nothing to configure.
 //
-// Connect rather than gRPC-Web, which is what mousewheeld uses: that daemon is
-// Rust and `tonic-web` translates in process, while this one is Python and the
-// edge is written here against the protocol specification. Connect's unary
-// call is a plain HTTP POST with the bare message in the body, which is a
-// great deal less to own than gRPC-Web's framing — and the browser cannot tell
-// the difference, because both are `createClient` over a transport.
+// The same transport statemachined's and mousewheeld's panels use, where
+// `tonic-web` answers it in process; this daemon is Python and the edge is
+// written against the protocol specification instead. It used to be Connect,
+// whose transport sends JSON unless told otherwise — and did. gRPC-Web has no
+// JSON codec, so what crosses is protobuf, as it is on every other wire in the
+// family (`contracts/DAEMON_LAYOUT.md`), refusals included.
 //
 // Every element takes a `base` attribute rather than assuming same-origin,
 // because the point of the `/elements/` contract is that a console served from
@@ -22,10 +22,11 @@
 //
 // **A panel never sees a protobuf message.** This is the browser's half of the
 // convert seam, and it is the same rule the daemon keeps in `api/convert/`:
-// the generated types stop here. What crosses is protobuf's JSON mapping —
-// `fromJson` on the way out, `toJson` on the way back — which is a plain object
-// with the field names the proto spells, and which refuses an unknown field in
-// a request by name, in the browser, exactly as the edge would.
+// the generated types stop here. What a panel hands over and gets back is
+// protobuf's JSON mapping — `fromJson` on the way out, `toJson` on the way
+// back — a plain object with the field names the proto spells, which refuses
+// an unknown field in a request by name, in the browser, before anything is
+// encoded. The JSON never leaves this file: the wire carries the binary.
 //
 // Those names are the proto's own: every field in `proto/triald/v1/` pins
 // `json_name` to its snake_case spelling, so `trial_number` is `trial_number`
@@ -36,8 +37,8 @@
 // panel reads as what it wants.
 
 import { createClient, ConnectError, Code } from "@connectrpc/connect";
-import { createConnectTransport } from "@connectrpc/connect-web";
-import { fromJson, toJson } from "@bufbuild/protobuf";
+import { createGrpcWebTransport } from "@connectrpc/connect-web";
+import { fromBinary, fromJson, toJson } from "@bufbuild/protobuf";
 
 import {
   State as StateService,
@@ -96,35 +97,46 @@ export class DaemonRefusedTheRequest extends Error {
   ///
   /// A daemon that is not running, a CORS rejection and a cancelled stream all
   /// arrive here too. They have no `triald.v1.Error` — nothing refused
-  /// anything, the call never landed — so the code is the Connect one and the
+  /// anything, the call never landed — so the code is the gRPC one and the
   /// detail is what the browser said.
   static from(thrown) {
     if (thrown instanceof DaemonRefusedTheRequest) return thrown;
     const failure = ConnectError.from(thrown);
-    // Connect spells its codes `not_found`; the generated enum spells them
+    // gRPC logs spell codes `not_found`; the generated enum spells them
     // `NotFound`. Show the one the daemon's own logs and the network tab show.
     const status = (Code[failure.code] ?? "Unknown").replace(/(?<=[a-z])(?=[A-Z])/g, "_").toLowerCase();
     return new DaemonRefusedTheRequest(status, refusalIn(failure) ?? { detail: failure.rawMessage });
   }
 }
 
-/// `triald.v1.Error` out of the error's details, or `null`.
+/// The trailer `triald.v1.Error` rides in: the key the gRPC port uses, so a
+/// browser and a Python client read the same bytes from the same place.
+const REFUSAL_METADATA_KEY = "triald-error-bin";
+
+/// `triald.v1.Error` out of the trailing metadata, or `null`.
 ///
-/// Connect carries error details as `google.protobuf.Any` — the type name and
-/// the base64 of the encoded message — and `findDetails` is what decodes the
-/// one we put there. An error with none is still an error; it just has no
-/// machine-readable code, which is the case for everything that failed before
-/// reaching a servicer.
+/// gRPC-Web carries a `-bin` metadata value base64-encoded, and without
+/// padding, which `atob` will not take. The same shape statemachined's and
+/// mousewheeld's clients read, because it is the same wire. An error with no
+/// refusal is still an error; it just has no machine-readable code, which is
+/// the case for everything that failed before reaching a servicer.
 function refusalIn(failure) {
-  const [refusal] = failure.findDetails(ErrorSchema);
-  if (refusal === undefined) return null;
-  return toJson(ErrorSchema, refusal, { alwaysEmitImplicit: true });
+  const encoded = failure.metadata?.get(REFUSAL_METADATA_KEY);
+  if (!encoded) return null;
+  try {
+    const padded = encoded + "=".repeat((4 - (encoded.length % 4)) % 4);
+    const binary = atob(padded.replace(/-/g, "+").replace(/_/g, "/"));
+    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    return toJson(ErrorSchema, fromBinary(ErrorSchema, bytes), { alwaysEmitImplicit: true });
+  } catch {
+    return null; // a refusal we cannot read is still a refusal; keep the sentence
+  }
 }
 
 export class DaemonApiClient {
   constructor(baseUrl) {
     this.baseUrl = (baseUrl || "").replace(/\/+$/, "");
-    const transport = createConnectTransport({ baseUrl: this.baseUrl || "/" });
+    const transport = createGrpcWebTransport({ baseUrl: this.baseUrl || "/" });
     this.state = createClient(StateService, transport);
     this.session = createClient(SessionService, transport);
     this.trial = createClient(TrialService, transport);
