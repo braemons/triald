@@ -29,11 +29,6 @@ serve = [
     # itself, and the routes it declared were a second spelling of the rpcs.
     "grpcio>=1.66",
     "uvicorn[standard]>=0.32",
-    # The client for whatever runs a trial (api/statemachine_executor.py). Here
-    # rather than in the core so that triald.executor -- the contract and the
-    # translation of what an executor publishes -- imports nothing at all and is
-    # testable with dictionaries.
-    "httpx>=0.28",
     # The generated wire types and their JSON mapping. Runtime only: protoc
     # runs from `make proto` and the output is committed, so a checkout needs
     # no compiler (`contracts/DAEMON_LAYOUT.md`).
@@ -94,10 +89,6 @@ dev = [
     # protoc and the gRPC stub generator. Development only: the generated code
     # is committed, so an install needs neither (`contracts/DAEMON_LAYOUT.md`).
     "grpcio-tools>=1.66",
-    # The three-daemon end-to-end test talks to statemachined and vstimd over
-    # the network. The browser edge's own tests need no client at all: they
-    # drive the ASGI app directly (tests/test_the_browser_edge.py).
-    "httpx>=0.28",
 ]
 
 [build-system]

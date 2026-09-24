@@ -32,11 +32,12 @@ these three modules are off to one side rather than mixed in with it.
 
 **The names below are resolved lazily, and that is not a micro-optimisation.**
 Not everything under ``api/`` needs the same things: `statemachine_executor`
-speaks HTTP and needs ``httpx``, `stimulus_subscriber` speaks ZeroMQ and needs
-neither. Re-exporting the serving layer eagerly would have made *every* module
-here cost a grpcio import, so a subscriber that was carefully written to need
-nothing could not be imported on a machine without the ``serve`` extra — its
-own care defeated by a neighbour's. PEP 562 keeps the convenient spelling
+speaks gRPC through ``statemachined-client``, `stimulus_subscriber` speaks
+ZeroMQ through ``vstimd-client`` and needs no grpcio at all. Re-exporting the
+serving layer eagerly would have made *every* module here cost a grpcio import,
+so a subscriber that was carefully written to need nothing could not be
+imported on a machine without the ``serve`` extra — its own care defeated by a
+neighbour's. PEP 562 keeps the convenient spelling
 without the coupling.
 """
 
