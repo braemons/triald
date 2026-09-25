@@ -173,10 +173,11 @@ exclude = ["src/triald/_proto"]
 # so it had stopped resolving some time before this.
 statemachined-client = { git = "https://github.com/braemons/statemachined.git", subdirectory = "client/python", branch = "main" }
 
-# vstimd's Python client, from its repo: it is not published to a registry. The
-# pin is the 0.3 branch, the release this one is tested with — 0.1 is released
-# and has no PUB socket at all.
-vstimd-client = { git = "https://github.com/braemons/vstimd.git", subdirectory = "client/python", branch = "0.3" }
+# vstimd's Python client, from its repo, on the same terms as the two above:
+# `main`, which is where vstimd's 0.3 line lives now. (It is on PyPI as
+# vstimd-client too, but from its repo the client and its proto match the
+# server they are tested against.)
+vstimd-client = { git = "https://github.com/braemons/vstimd.git", subdirectory = "client/python", branch = "main" }
 
 # mousewheeld's Python client, from its repo, on the same terms as
 # statemachined's: `main`, because the client and its proto ship together.

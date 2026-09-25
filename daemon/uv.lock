@@ -937,7 +937,7 @@ dev = [
     { name = "ruff", specifier = ">=0.8" },
     { name = "ty", specifier = ">=0.0.1a1" },
 ]
-stimulus = [{ name = "vstimd-client", git = "https://github.com/braemons/vstimd.git?subdirectory=client%2Fpython&branch=0.3" }]
+stimulus = [{ name = "vstimd-client", git = "https://github.com/braemons/vstimd.git?subdirectory=client%2Fpython&branch=main" }]
 
 [[package]]
 name = "ty"
@@ -1040,7 +1040,7 @@ wheels = [
 [[package]]
 name = "vstimd-client"
 version = "0.3.0a2"
-source = { git = "https://github.com/braemons/vstimd.git?subdirectory=client%2Fpython&branch=0.3#9ec814df36ca7069a57d08b78778bbec47d7f3f5" }
+source = { git = "https://github.com/braemons/vstimd.git?subdirectory=client%2Fpython&branch=main#6a612c061ac531718f2cbe940a18873720553da9" }
 dependencies = [
     { name = "protobuf" },
     { name = "pyzmq" },
