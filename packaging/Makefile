@@ -283,6 +283,16 @@ $(STAGE)/.stamp: $(SRC)/daemon/pyproject.toml
 	       $(STAGE)$(PREFIX)/lib/python*/lib2to3 $(STAGE)$(PREFIX)/lib/python*/ensurepip \
 	       $(STAGE)$(PREFIX)/lib/python*/site-packages/pip \
 	       $(STAGE)$(PREFIX)/lib/python*/site-packages/pip-*.dist-info
+	@#  Tcl and Tk went with tkinter above; their libraries are 6 MB of nothing.
+	rm -rf $(STAGE)$(PREFIX)/lib/libtcl* $(STAGE)$(PREFIX)/lib/libtk* \
+	       $(STAGE)$(PREFIX)/lib/tcl* $(STAGE)$(PREFIX)/lib/tk* \
+	       $(STAGE)$(PREFIX)/lib/python*/lib-dynload/_tkinter*
+	@#  numpy's and scipy's own test suites: nearly 50 MB, never imported by a
+	@#  policy, and what pushed the .deb past the 100 MB a file may be on the
+	@#  archive's gh-pages branch (braemons/packages).
+	find $(STAGE)$(PREFIX)/lib/python*/site-packages/numpy \
+	     $(STAGE)$(PREFIX)/lib/python*/site-packages/scipy \
+	  -type d -name tests -prune -exec rm -rf {} +
 	find $(STAGE)$(PREFIX)/bin -mindepth 1 \
 	  -not -name python -not -name python3 -not -name 'python3.[0-9]*' -delete
 	rm -f $(STAGE)$(PREFIX)/bin/*-config

@@ -86,5 +86,9 @@ scripts:
   postremove: packaging/scripts/postremove.sh
 
 deb:
+  # xz rather than nfpm's default gzip: a fifth smaller, and the archive's
+  # gh-pages branch refuses any file over 100 MB. dpkg reads xz everywhere a
+  # rig runs.
+  compression: xz
   fields:
     Bugs: https://github.com/braemons/triald/issues
