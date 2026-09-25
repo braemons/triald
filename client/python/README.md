@@ -35,13 +35,19 @@ rig should not mean installing one.
 
 ## `trialctl`
 
-The same client as a command line. `--rig` takes `host` or `host:port`.
+The same client as a command line. It follows the family's rules for a
+`<name>ctl` (`contracts/DAEMON_LAYOUT.md`): `--rig` takes `host` or
+`host:port`, else `$BRAEMONS_RIG`, else localhost. Everything prints JSON, one
+object per line for a stream. A refusal is JSON on stderr with a shared exit
+status (3 nothing answered, 5 refused, 6 not found).
 
 ```console
-$ trialctl --rig rig.local state
-$ trialctl --rig rig.local watch
-$ trialctl --rig rig.local sets
-$ trialctl --rig rig.local policy check my_staircase.py
+$ export BRAEMONS_RIG=rig.local
+$ trialctl state
+$ trialctl watch --summary
+$ trialctl sets list
+$ trialctl sets load training
+$ trialctl policy check my_staircase.py
 ```
 
 ## Licence

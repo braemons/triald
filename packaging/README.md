@@ -86,7 +86,7 @@ vendored interpreter with `trialctl env install psychopy`, which is
 ABI-compatible by construction because there is only one interpreter. See
 `dev/PLAN.md`, "The runtime environment".
 
-`trialctl` does not exist yet, and neither does the rig config's
+`trialctl env` does not exist yet, and neither does the rig config's
 `extra_packages` — the rig config refuses keys it does not know rather than
 ignoring them, so that key is not accepted today. Recording a setting nothing
 acts on would be worse than not having it.

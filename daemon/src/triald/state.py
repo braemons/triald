@@ -69,6 +69,10 @@ class TrialSpec:
     want a watchdog.
     """
 
+    mousewheel_zone_set: str = ""
+    """The zone set mousewheeld is to arm for this trial, latched from the
+    trial type. Empty means none."""
+
     def as_dict(self) -> dict[str, object]:
         return {
             "trial_number": self.trial_number,
@@ -77,6 +81,7 @@ class TrialSpec:
             "trial_type_name": self.trial_type_name,
             "set_name": self.set_name,
             "statemachine_graph": self.statemachine_graph,
+            "mousewheel_zone_set": self.mousewheel_zone_set,
             "reward_ms": self.reward_ms,
             "recording": self.recording,
             "paused": self.paused,

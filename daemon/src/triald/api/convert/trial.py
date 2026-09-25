@@ -24,6 +24,7 @@ def trial_spec_to_wire(spec: TrialSpec) -> trial_pb2.TrialSpec:
         trial_type_name=spec.trial_type_name,
         set_name=spec.set_name,
         statemachine_graph=spec.statemachine_graph,
+        mousewheel_zone_set=spec.mousewheel_zone_set,
         reward_ms=spec.reward_ms,
         recording=spec.recording,
         paused=spec.paused,

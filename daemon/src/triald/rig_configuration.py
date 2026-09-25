@@ -2,9 +2,9 @@
 """The box, as opposed to the experiment.
 
 Two different things have been called "config" here, and the systemd unit ran
-into the difference: it passed
-``--config /etc/braemons/triald-rig-config.toml`` to a flag that wants a
-*session* config JSON -- the trial types, the switch rules, the seed. Those are
+into the difference: it passed ``/etc/braemons/triald-rig-config.toml`` to a
+``--config`` flag that wanted a *session* config JSON -- the trial types, the
+switch rules, the seed. That flag is ``--session-config`` now. Those are
 an experiment. What an installed daemon needs first is the box: where to bind,
 where the results go, where uploaded policies are kept. Nobody edits a rig's
 bind address between blocks, and nobody edits trial types by logging into a Pi.

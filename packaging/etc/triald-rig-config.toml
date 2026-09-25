@@ -33,5 +33,9 @@ policy_directory = "/var/lib/braemons/triald/policies"
 # unset by default: a daemon that comes up after a reboot with no experiment
 # loaded is waiting to be told what to run, which is safer than a daemon that
 # resumes something nobody asked it to.
+#
+# The session config's format is docs/reference/session-config.schema.json in
+# the triald repository, and examples/session-config.json there is the demo
+# experiment written as one. `triald serve --session-config` overrides this.
 #session_config = "/var/lib/braemons/triald/sessions/current.json"
 #policy = "/var/lib/braemons/triald/policies/current.py"

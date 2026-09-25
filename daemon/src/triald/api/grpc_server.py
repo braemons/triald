@@ -17,7 +17,9 @@ from __future__ import annotations
 import logging
 
 import grpc
+from grpc_reflection.v1alpha import reflection
 
+from triald._proto.triald.v1 import service_pb2
 from triald.api.service import SessionService
 from triald.api.servicers import (
     config_servicer,
@@ -75,8 +77,22 @@ def build_server(service: SessionService, address: str) -> grpc.aio.Server:
     server = grpc.aio.server()
     for register in REGISTRARS.values():
         register(service, server)
+    enable_server_reflection(server)
     server.add_insecure_port(address)
     return server
+
+
+def enable_server_reflection(server: grpc.aio.Server) -> None:
+    """Answer gRPC server reflection, as statemachined and mousewheeld do.
+
+    `grpcurl rig-3.local:8421 list` then names every service without a copy of
+    `proto/` on the machine asking, and a generator can read the descriptors off
+    the running daemon. The names come from the generated descriptor rather than
+    from `REGISTRARS`, so a service added to the `.proto` is listed the day it
+    is registered.
+    """
+    names = [service.full_name for service in service_pb2.DESCRIPTOR.services_by_name.values()]
+    reflection.enable_server_reflection([*names, reflection.SERVICE_NAME], server)
 
 
 #: The gRPC port, from the port a browser is pointed at.

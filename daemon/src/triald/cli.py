@@ -44,6 +44,7 @@ from triald.rig_configuration import (
 from triald.runner import run_session
 from triald.selection import Ordering
 from triald.session import Session, SessionConfig, SessionError
+from triald.session_config_file import SessionConfigFileError, read_session_config_file
 from triald.state import TrialRecord
 from triald.trialtypes import TrialType, TrialTypeSet, TrialTypeStore
 
@@ -80,7 +81,9 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command")
 
     sim = sub.add_parser("sim", help="run a session against a simulated subject")
-    sim.add_argument("--config", type=Path, help="session config JSON")
+    sim.add_argument(
+        "--session-config", type=Path, help="the experiment: settings and trial type sets, JSON"
+    )
     sim.add_argument("--policy", type=Path, help="policy .py to load")
     sim.add_argument("--trials", type=int, default=200, help="trial ceiling")
     sim.add_argument("--hit-rate", type=float, default=0.75)
@@ -127,7 +130,11 @@ def _build_parser() -> argparse.ArgumentParser:
     # rig config that set a port would be overridden by a flag nobody passed.
     serve.add_argument("--host", help=f"bind address (default: {DEFAULT_HOST})")
     serve.add_argument("--port", type=int, help=f"port (default: {DEFAULT_PORT})")
-    serve.add_argument("--config", type=Path, help="session config JSON")
+    # The experiment, not the box: `--session-config`, never a bare `--config`,
+    # which on this daemon once meant one and on statemachined the other.
+    serve.add_argument(
+        "--session-config", type=Path, help="the experiment: settings and trial type sets, JSON"
+    )
     serve.add_argument("--policy", type=Path, help="policy .py to load at startup")
     serve.add_argument(
         "--results-dir",
@@ -135,6 +142,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="write session records under here; without it nothing is recorded",
     )
     serve.add_argument("--policy-dir", type=Path, help="where uploaded policies are stored")
+    serve.add_argument(
+        "--no-mdns",
+        action="store_true",
+        help="do not advertise _triald._tcp; a console then needs the address by hand",
+    )
 
     return parser
 
@@ -143,7 +155,15 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _cmd_sim(args: argparse.Namespace) -> int:
-    store, config = _load_config(args.config) if args.config else demo_experiment()
+    try:
+        store, config = (
+            read_session_config_file(args.session_config)
+            if args.session_config
+            else demo_experiment()
+        )
+    except SessionConfigFileError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
     if args.seed is not None:
         config.seed = args.seed
 
@@ -323,10 +343,22 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     port = args.port if args.port is not None else rig.port
     results_dir = args.results_dir if args.results_dir is not None else rig.results_directory
     policy_dir = args.policy_dir if args.policy_dir is not None else rig.policy_directory
-    session_config = args.config if args.config is not None else rig.session_config
+    session_config = (
+        args.session_config if args.session_config is not None else rig.session_config
+    )
     policy_path = args.policy if args.policy is not None else rig.policy
 
-    store, config = _load_config(session_config) if session_config else demo_experiment()
+    try:
+        store, config = (
+            read_session_config_file(session_config) if session_config else demo_experiment()
+        )
+    except SessionConfigFileError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    if session_config:
+        print(f"session config: {session_config}")
+    else:
+        print("note: no session config, so this is the built-in demo experiment")
 
     policy: Policy | None = None
     if policy_path:
@@ -350,11 +382,13 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 
     grpc_port = grpc_port_for(port)
     print(f"triald: panels on http://{host}:{port}/, gRPC on {host}:{grpc_port}")
-    asyncio.run(_serve_both(service, host, port, grpc_port))
+    asyncio.run(_serve_both(service, host, port, grpc_port, advertise=not args.no_mdns))
     return 0
 
 
-async def _serve_both(service, host: str, web_port: int, grpc_port: int) -> None:
+async def _serve_both(
+    service, host: str, web_port: int, grpc_port: int, *, advertise: bool = True
+) -> None:
     """The two listeners, on one loop, in one process.
 
     They are two because a Python daemon cannot be one: `grpc.aio` owns a
@@ -369,6 +403,7 @@ async def _serve_both(service, host: str, web_port: int, grpc_port: int) -> None
     import uvicorn
 
     from triald.api.grpc_server import build_server, build_servicers
+    from triald.api.mdns_service_advertisement import MdnsServiceAdvertisement
     from triald.api.web_edge import build_edge
 
     # **The watchdog is the daemon's, not a transport's.** It ends a trial
@@ -393,9 +428,13 @@ async def _serve_both(service, host: str, web_port: int, grpc_port: int) -> None
     )
 
     await rpc_server.start()
+    advertisement = MdnsServiceAdvertisement(host, web_port, grpc_port, __version__)
+    if advertise:
+        await advertisement.start()
     try:
         await edge.serve()
     finally:
+        await advertisement.stop()
         await rpc_server.stop(grace=1.0)
 
 
@@ -481,13 +520,6 @@ def _ad_hoc_experiment(names: list[str]) -> tuple[TrialTypeStore, SessionConfig]
         ]
     )
     return store, SessionConfig(initial_set="check", rounds=1000, seed=0)
-
-
-def _load_config(path: Path) -> tuple[TrialTypeStore, SessionConfig]:
-    raise SystemExit(
-        f"loading a session config from {path} is not implemented yet - see "
-        f"dev/PLAN.md. Run 'triald sim' with no --config for the demo experiment."
-    )
 
 
 if __name__ == "__main__":

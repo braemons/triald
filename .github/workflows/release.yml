@@ -103,6 +103,8 @@ jobs:
           ls dist/
           test -n "$(find dist -name "triald-*.whl" ! -name 'triald-0.0.0*')" \
             || { echo "the wheel is unstamped (expected $expected)"; exit 1; }
+          test -n "$(find dist -name "triald_client-*.whl" ! -name 'triald_client-0.0.0*')" \
+            || { echo "the client wheel is unstamped (expected $expected)"; exit 1; }
 
       - uses: actions/upload-artifact@v4
         with:

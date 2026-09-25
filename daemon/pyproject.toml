@@ -20,16 +20,21 @@ dependencies = []
 # the policy API can be imported and tested with nothing installed at all.
 serve = [
     # The API is gRPC. `grpc.aio` serves it on the daemon's own port, and
-    # uvicorn serves `api/web_edge.py` — the panels, and the Connect protocol
-    # a browser can speak — beside it.
+    # uvicorn serves `api/web_edge.py` — the panels, and gRPC-Web for a
+    # browser — beside it.
     #
     # **fastapi and pydantic were here and are not.** The interface is
     # authored in `proto/triald/v1/` and the types are generated from it, so a
     # web framework's schema generation had nothing left to describe but
     # itself, and the routes it declared were a second spelling of the rpcs.
     "grpcio>=1.66",
+    # Server reflection, so `grpcurl` and a generator can list the services
+    # from the running daemon. statemachined and mousewheeld answer it too.
+    "grpcio-reflection>=1.66",
+    # `_triald._tcp`, so a console finds this daemon without a `rigs.json` line.
+    "zeroconf>=0.136",
     "uvicorn[standard]>=0.32",
-    # The generated wire types and their JSON mapping. Runtime only: protoc
+    # The generated wire types. Runtime only: protoc
     # runs from `make proto` and the output is committed, so a checkout needs
     # no compiler (`contracts/DAEMON_LAYOUT.md`).
     #
@@ -55,6 +60,10 @@ serve = [
     #
     # LGPL, so importing it places nothing here under copyleft.
     "statemachined-client",
+    # mousewheeld's own client, for the same reason: api/mousewheel_zone_arming.py
+    # arms a trial type's zone set with it (contracts/INTERACTIONS.md §3 D).
+    # Its dependencies are grpcio and protobuf, again, and it is AGPL like triald.
+    "mousewheeld-client",
 ]
 
 # Adaptive procedures beyond the up/down family in triald.adaptive. Never a hard
@@ -147,7 +156,7 @@ exclude = ["src/triald/_proto"]
 # **ty cannot see `triald.v1`, and that is expected.** The generated modules
 # reach each other by that name because `triald/__init__.py` extends `__path__`
 # at import time, which is a runtime fact a static checker has no way to follow
-# — vstimd's client has the same arrangement and the same blind spot. The
+# — the daemon owns the name, so there is nothing to rewrite it to. The
 # imports are exercised by the test suite instead, which is the check that
 # actually runs the code.
 
@@ -168,3 +177,7 @@ statemachined-client = { git = "https://github.com/braemons/statemachined.git", 
 # pin is the 0.3 branch, the release this one is tested with — 0.1 is released
 # and has no PUB socket at all.
 vstimd-client = { git = "https://github.com/braemons/vstimd.git", subdirectory = "client/python", branch = "0.3" }
+
+# mousewheeld's Python client, from its repo, on the same terms as
+# statemachined's: `main`, because the client and its proto ship together.
+mousewheeld-client = { git = "https://github.com/braemons/mousewheeld.git", subdirectory = "client/python", branch = "main" }

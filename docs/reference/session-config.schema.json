@@ -1,0 +1,255 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/braemons/triald/blob/main/docs/reference/session-config.schema.json",
+  "title": "triald session config",
+  "description": "One experiment: its settings and its trial type sets. Read by `triald serve --session-config`, and named by the rig config's `session_config`. Written by hand in docs/reference/; daemon/tests/test_session_config_file.py holds its property names to the reader's.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "settings",
+    "sets"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "initial_set"
+      ],
+      "properties": {
+        "initial_set": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The set to start in."
+        },
+        "ordering": {
+          "enum": [
+            "random_in_round",
+            "random_in_experiment",
+            "ascending",
+            "descending",
+            "random_with_replacement"
+          ],
+          "default": "random_in_round"
+        },
+        "rounds": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 10
+        },
+        "avoid_repeat": {
+          "type": "boolean",
+          "default": true
+        },
+        "acceptance": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Which outcomes consume a slot in the round, and the two modifiers that can veto any of them.",
+          "properties": {
+            "not_started": {
+              "type": "boolean",
+              "default": false
+            },
+            "hit": {
+              "type": "boolean",
+              "default": true
+            },
+            "wrong_response": {
+              "type": "boolean",
+              "default": true
+            },
+            "early_hit": {
+              "type": "boolean",
+              "default": true
+            },
+            "early_wrong_response": {
+              "type": "boolean",
+              "default": true
+            },
+            "early": {
+              "type": "boolean",
+              "default": true
+            },
+            "late": {
+              "type": "boolean",
+              "default": true
+            },
+            "eye_error": {
+              "type": "boolean",
+              "default": true
+            },
+            "unexpected_start_signal": {
+              "type": "boolean",
+              "default": false
+            },
+            "wrong_start_signal": {
+              "type": "boolean",
+              "default": false
+            },
+            "cancelled": {
+              "type": "boolean",
+              "default": false
+            },
+            "never_finished": {
+              "type": "boolean",
+              "default": false
+            },
+            "frame_loss": {
+              "type": "boolean",
+              "default": true
+            },
+            "imprecise_fixation": {
+              "type": "boolean",
+              "default": true
+            }
+          }
+        },
+        "trial_cap_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "Watchdog: how long before a trial nobody reported is recorded as NEVER_FINISHED. 0 is none."
+        },
+        "stop_when_rounds_done": {
+          "type": "boolean",
+          "default": false
+        },
+        "stop_after_trials": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "stop_criterion": {
+          "enum": [
+            "accepted_trials",
+            "hits",
+            "all_trials"
+          ],
+          "default": "accepted_trials"
+        },
+        "extend_trial_type_number": {
+          "type": "boolean",
+          "default": false
+        },
+        "seed": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Generated and recorded when null."
+        }
+      }
+    },
+    "sets": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "trial_types"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "trial_types": {
+            "type": "array",
+            "maxItems": 256,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "trials_per_round": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "default": 0
+                },
+                "statemachine_graph": {
+                  "type": "string",
+                  "default": "",
+                  "description": "A graph in the executor's store, by name. Empty: whatever is loaded."
+                },
+                "reward_ms": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "default": 0
+                },
+                "params": {
+                  "type": "object",
+                  "default": {},
+                  "description": "Passed through, never interpreted."
+                },
+                "mousewheel_zone_set": {
+                  "type": "string",
+                  "default": "",
+                  "description": "A zone set in mousewheeld's store, by name, armed for this type's trials. Empty: none."
+                }
+              }
+            }
+          },
+          "switch_rule": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "default": false
+              },
+              "criterion": {
+                "enum": [
+                  "accepted_trials",
+                  "hits",
+                  "all_trials"
+                ],
+                "default": "hits"
+              },
+              "count": {
+                "type": "integer",
+                "minimum": 0,
+                "default": 0
+              },
+              "target": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

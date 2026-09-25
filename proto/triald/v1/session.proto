@@ -56,6 +56,7 @@ message CounterRow {
   // Chance this type is drawn next by the declarative ordering. Advisory: a
   // policy that selects for itself is not consulted here.
   double p_next = 14 [json_name = "p_next"];
+  string mousewheel_zone_set = 15 [json_name = "mousewheel_zone_set"];
 }
 
 // How far the active set has got towards its switch rule.

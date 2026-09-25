@@ -36,6 +36,12 @@ message TrialType {
   // Paradigm values, stored and returned verbatim; never interpreted. Arbitrary
   // because this daemon has no opinion about what a paradigm needs.
   google.protobuf.Struct params = 5;
+
+  // Name of the zone set mousewheeld arms for this type's trials; empty means
+  // none. A name in mousewheeld's store, never a slot: mousewheeld refuses a
+  // name it does not have. Prefixed on this side for the reason
+  // `statemachine_graph` is.
+  string mousewheel_zone_set = 6 [json_name = "mousewheel_zone_set"];
 }
 
 // A named collection of trial types plus its switch rule.

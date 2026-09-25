@@ -12,21 +12,30 @@ as the API would do it.
 
 from __future__ import annotations
 
-import json
-
 import pytest
 
 pytest.importorskip("google.protobuf", reason="the wire types need the serve extra")
 
 # Below the skip, so a checkout without the `serve` extra skips this file rather
 # than failing to collect it.
-from triald.api import convert, wire  # noqa: I001
+from google.protobuf import json_format  # noqa: I001
+from triald.api import convert
 from triald.counters import TrialCountCriterion
 from triald.outcomes import Manipulandum, OutcomeReport, TrialOutcome
 from triald.selection import Ordering
 from triald.session import Session, SessionConfig
 from triald.trialtypes import SwitchRule, TrialType, TrialTypeSet, TrialTypeStore
 from triald._proto.triald.v1 import config_pb2, sets_pb2
+
+
+def as_dict(message) -> dict:
+    """A message as the dict a person reads: `json_name` spellings, defaults written."""
+    return json_format.MessageToDict(message, always_print_fields_with_no_presence=True)
+
+
+def parse(text: str, message_type):
+    """A message from JSON, refusing a field it does not know."""
+    return json_format.Parse(text, message_type(), ignore_unknown_fields=False)
 
 
 def a_set() -> TrialTypeSet:
@@ -74,7 +83,7 @@ def test_a_finished_trial_survives_the_seam():
     record = session.state().last
     assert record is not None
 
-    written = json.loads(wire.to_json(convert.trial_record_to_wire(record)))
+    written = as_dict(convert.trial_record_to_wire(record))
 
     assert written["outcome"]["name"] == "HIT"
     assert written["outcome"]["code"] == 1
@@ -105,7 +114,7 @@ def test_a_whole_session_state_survives_the_seam():
         },
         policy_errors=[],
     )
-    written = json.loads(wire.to_json(message))
+    written = as_dict(message)
 
     assert written["set_name"] == "easy"
     assert written["totals"]["by_outcome"] == {"HIT": 1}
@@ -128,10 +137,10 @@ def test_an_omitted_criterion_means_a_different_thing_in_each_place():
     # distinction being tested: a field left out of the *document* has no
     # presence, while one written as UNSPECIFIED has presence and asks for the
     # default back. Constructing the message in Python sets presence either way.
-    left_out = wire.from_json('{"rounds": 3}', config_pb2.ConfigPatch)
+    left_out = parse('{"rounds": 3}', config_pb2.ConfigPatch)
     assert convert.config_patch_from_wire(left_out) == {"rounds": 3}
 
-    written_out = wire.from_json(
+    written_out = parse(
         '{"rounds": 3, "stop_criterion": "TRIAL_COUNT_CRITERION_UNSPECIFIED"}',
         config_pb2.ConfigPatch,
     )
@@ -158,7 +167,7 @@ def test_an_absent_precise_fixation_means_fixation_held():
     # The eye monitor is optional, and a rig without one must not refuse every
     # trial. The only field in the inbound message where absent is not false.
     report = convert.outcome_report_from_wire(
-        wire.from_json(
+        parse(
             '{"trial_id": "1", "outcome": "HIT"}',
             __import__(
                 "triald._proto.triald.v1.trial_pb2", fromlist=["OutcomeReport"]

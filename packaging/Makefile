@@ -177,9 +177,18 @@ deb rpm: export TRIALD_PKG_VERSION = $(VERSION)
 # stamped copy for the same reason the package is: pyproject.toml carries the
 # 0.0.0 sentinel in the repository, and a build must never leave the working
 # tree dirty.
-wheel: $(SRC)/daemon/pyproject.toml  ## the wheel and the sdist, stamped, into dist/
+#
+# The client's wheel is published beside it, as statemachined and mousewheeld
+# publish theirs: `braemons-tools` (braemons/rig) installs `trialctl` from it,
+# stamped with the same version as the daemon it talks to.
+wheel: $(SRC)/daemon/pyproject.toml  ## the wheels and the sdist, stamped, into dist/
 	@mkdir -p $(DIST_DIR)
 	$(UV) build --project $(SRC)/daemon --out-dir $(DIST_DIR)
+	@rm -rf $(BUILD)/client && mkdir -p $(BUILD)/client
+	tar -C $(ROOT)/client/python --exclude=.venv --exclude=build --exclude=dist \
+	  --exclude=__pycache__ --exclude=.pytest_cache -cf - . | tar -C $(BUILD)/client -xf -
+	cd $(BUILD)/client && $(UV) version --frozen $(PY_VERSION) >/dev/null && \
+	  $(UV) build --wheel --out-dir $(DIST_DIR)
 	@ls -1 $(DIST_DIR)/*.whl $(DIST_DIR)/*.tar.gz
 
 # ── The staged tree ─────────────────────────────────────────────────────────

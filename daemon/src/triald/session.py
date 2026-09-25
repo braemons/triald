@@ -279,6 +279,7 @@ class Session:
             trial_type_name=trial_type.name,
             set_name=self._set.name,
             statemachine_graph=trial_type.statemachine_graph,
+            mousewheel_zone_set=trial_type.mousewheel_zone_set,
             reward_ms=trial_type.reward_ms,
             recording=self._recording and not paused,
             paused=paused,

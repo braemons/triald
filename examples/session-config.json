@@ -1,0 +1,108 @@
+{
+  "$schema": "../docs/reference/session-config.schema.json",
+  "settings": {
+    "initial_set": "fixation",
+    "ordering": "random_in_round",
+    "rounds": 5,
+    "avoid_repeat": true,
+    "acceptance": {
+      "not_started": false,
+      "hit": true,
+      "wrong_response": true,
+      "early_hit": true,
+      "early_wrong_response": true,
+      "early": true,
+      "late": true,
+      "eye_error": true,
+      "unexpected_start_signal": false,
+      "wrong_start_signal": false,
+      "cancelled": false,
+      "never_finished": false,
+      "frame_loss": true,
+      "imprecise_fixation": true
+    },
+    "trial_cap_ms": 0,
+    "stop_when_rounds_done": false,
+    "stop_after_trials": null,
+    "stop_criterion": "accepted_trials",
+    "extend_trial_type_number": true,
+    "seed": 0
+  },
+  "sets": [
+    {
+      "name": "fixation",
+      "trial_types": [
+        {
+          "name": "fix_only",
+          "trials_per_round": 4,
+          "statemachine_graph": "",
+          "reward_ms": 120,
+          "params": {}
+        },
+        {
+          "name": "fix_dim",
+          "trials_per_round": 2,
+          "statemachine_graph": "",
+          "reward_ms": 140,
+          "params": {}
+        }
+      ],
+      "switch_rule": {
+        "enabled": true,
+        "criterion": "hits",
+        "count": 20,
+        "target": "one_line"
+      }
+    },
+    {
+      "name": "one_line",
+      "trial_types": [
+        {
+          "name": "line_0deg",
+          "trials_per_round": 3,
+          "statemachine_graph": "",
+          "reward_ms": 160,
+          "params": {}
+        },
+        {
+          "name": "line_90deg",
+          "trials_per_round": 3,
+          "statemachine_graph": "",
+          "reward_ms": 160,
+          "params": {}
+        }
+      ],
+      "switch_rule": {
+        "enabled": true,
+        "criterion": "hits",
+        "count": 20,
+        "target": "one_half_cyc"
+      }
+    },
+    {
+      "name": "one_half_cyc",
+      "trial_types": [
+        {
+          "name": "cyc_left",
+          "trials_per_round": 3,
+          "statemachine_graph": "",
+          "reward_ms": 180,
+          "params": {}
+        },
+        {
+          "name": "cyc_right",
+          "trials_per_round": 3,
+          "statemachine_graph": "",
+          "reward_ms": 180,
+          "params": {}
+        }
+      ],
+      "switch_rule": {
+        "enabled": false,
+        "criterion": "hits",
+        "count": 0,
+        "target": null
+      }
+    }
+  ]
+}

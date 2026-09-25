@@ -103,6 +103,18 @@ class TrialType:
     every trial, so the level that actually ran is never in doubt.
     """
 
+    mousewheel_zone_set: str = ""
+    """Name of the zone set mousewheeld arms for this type's trials. Empty
+    means none.
+
+    A **name** in mousewheeld's store, never a slot, for the reason
+    :attr:`statemachine_graph` is one; mousewheeld refuses a name it does not
+    have. Prefixed because in triald's vocabulary a bare "zone set" does not say
+    whose it is. The zones are decided on mousewheeld's board and leave as TTL
+    edges; triald only says which set to arm (interaction D in
+    `contracts/INTERACTIONS.md`).
+    """
+
 
 @dataclasses.dataclass(slots=True)
 class TrialTypeSet:

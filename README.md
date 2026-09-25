@@ -1,8 +1,12 @@
 # Trial Control Daemon — triald
 
-> **Status:** early alpha — the domain logic, the scripting API, the gRPC API
-> and the web UI work and are tested. The Python client, the rig integration
-> and the packaging are not finished yet.
+> **Status:** early alpha (`v0.3.0-alpha2`) — the domain logic, the scripting
+> API, the gRPC API, the web UI, the Python client and the `.deb` work and are
+> tested, and `contracts/e2e-tests/` runs sessions against statemachined and
+> vstimd with it. A session config is a JSON file
+> ([`examples/session-config.json`](examples/session-config.json), checked by
+> [`docs/reference/session-config.schema.json`](docs/reference/session-config.schema.json));
+> sets and settings changed over the API are not yet written back to it.
 
 **triald** decides what trial runs next, records what happened, and lets you write
 the decision in Python. It is the part of a behavioural rig that owns trial
@@ -36,6 +40,7 @@ it out buys three things:
 ## Try it without a rig
 
 ```sh
+cd daemon                                 # the Python project; `make sync` from the root
 uv sync --group dev
 uv run triald sim --trials 200            # a demo experiment, simulated subject
 uv run triald sim --trials 200 --trace    # every trial
@@ -50,7 +55,7 @@ For the same thing with a face on it:
 
 ```sh
 uv sync --group dev --extra serve
-uv run triald serve                       # http://127.0.0.1:8420, API docs at /docs
+uv run triald serve                       # panels on http://127.0.0.1:8420, gRPC on 8421
 ```
 
 The session view shows the counters, the round, the sets and how far the loaded
@@ -112,8 +117,9 @@ times. Anything a policy returns from `snapshot()` is plottable without extra
 work. And a small CodeMirror policy editor for tweaks between blocks: read-only
 by default, with Check-before-Load not skippable.
 
-Clients for **Python**, **MATLAB** (over HTTP and JSON, so no toolbox and no
-MATLAB-to-Python version matching) and **Bonsai** (a NuGet package whose source
+Clients for **MATLAB** and **Bonsai** (the Python one is built —
+[`client/python/`](client/python/)). The API is gRPC now, so a MATLAB client
+is no longer `webread` and JSON; how it reaches a rig is open. **Bonsai** (a NuGet package whose source
 and sink operators map onto the state stream directly).
 
 ## Documentation

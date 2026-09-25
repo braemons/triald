@@ -743,7 +743,7 @@ as much as the API:
 | Before | Now | |
 |---|---|---|
 | hand-written `as_dict()` in `state.py` | serialisation for free | not yet |
-| config files parsed and validated by hand | validation with real messages, which matters for a file a scientist edits | not yet |
+| config files parsed and validated by hand | validation with real messages, which matters for a file a scientist edits | **done**, by hand and not through the proto: the session config is a document (`contracts/DAEMON_LAYOUT.md`), and `session_config_file.py` names the path to every bad value |
 | the JSONL record shape, defined implicitly by `as_dict()` | one description, so the record and the wire cannot drift | **done, by test** |
 
 The third arrived without the first. `test_the_wire_carries_the_whole_trial`
@@ -1120,7 +1120,10 @@ imported by triald, avoids reimplementing the binary reader entirely.
    gRPC-Web edge for the browser (Connect until 0.3, whose JSON default the
    panels were using)
 4. ~~Web interface, session view~~ — **done**, on a generated client
-5. Session and rig config files, and the VStim importer
+5. ~~Session and rig config files~~ **done** — `triald-rig-config.toml`, and
+   the session config as JSON (`session_config_file.py`,
+   `docs/reference/session-config.schema.json`). Left: writing API changes
+   back to the file, and the VStim importer
 6. Python client, then MATLAB, then Bonsai
 7. Web interface: the CodeMirror editor, then the charts
 8. The coupling contract, then the microcontroller's outcome table and firmware

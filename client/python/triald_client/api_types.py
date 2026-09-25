@@ -194,6 +194,8 @@ class TrialSpec:
     paused: bool
     started_at: dt.datetime | None = None
     deadline: dt.datetime | None = None
+    #: The zone set mousewheeld arms for this trial; empty means none.
+    mousewheel_zone_set: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -331,6 +333,9 @@ class TrialType:
     statemachine_graph: str = ""
     reward_ms: int = 0
     params: dict[str, Any] = field(default_factory=dict)
+    #: The zone set mousewheeld arms for this type's trials, by name; empty
+    #: means none.
+    mousewheel_zone_set: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -410,6 +415,7 @@ class CounterRow:
     by_outcome: dict[str, int]
     hits: int
     hit_rate: float | None
+    mousewheel_zone_set: str = ""
 
 
 @dataclass(frozen=True, slots=True)

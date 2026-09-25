@@ -39,7 +39,7 @@ class ResultCount(_message.Message):
     def __init__(self, total: _Optional[int] = ..., accepted: _Optional[int] = ..., remaining: _Optional[int] = ..., frame_loss: _Optional[int] = ..., by_outcome: _Optional[_Mapping[str, int]] = ..., hits: _Optional[int] = ..., hit_rate: _Optional[float] = ...) -> None: ...
 
 class CounterRow(_message.Message):
-    __slots__ = ("total", "accepted", "remaining", "frame_loss", "by_outcome", "hits", "hit_rate", "index", "trial_type_number", "name", "trials_per_round", "statemachine_graph", "reward_ms", "p_next")
+    __slots__ = ("total", "accepted", "remaining", "frame_loss", "by_outcome", "hits", "hit_rate", "index", "trial_type_number", "name", "trials_per_round", "statemachine_graph", "reward_ms", "p_next", "mousewheel_zone_set")
     class ByOutcomeEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -61,6 +61,7 @@ class CounterRow(_message.Message):
     STATEMACHINE_GRAPH_FIELD_NUMBER: _ClassVar[int]
     REWARD_MS_FIELD_NUMBER: _ClassVar[int]
     P_NEXT_FIELD_NUMBER: _ClassVar[int]
+    MOUSEWHEEL_ZONE_SET_FIELD_NUMBER: _ClassVar[int]
     total: int
     accepted: int
     remaining: int
@@ -75,7 +76,8 @@ class CounterRow(_message.Message):
     statemachine_graph: str
     reward_ms: int
     p_next: float
-    def __init__(self, total: _Optional[int] = ..., accepted: _Optional[int] = ..., remaining: _Optional[int] = ..., frame_loss: _Optional[int] = ..., by_outcome: _Optional[_Mapping[str, int]] = ..., hits: _Optional[int] = ..., hit_rate: _Optional[float] = ..., index: _Optional[int] = ..., trial_type_number: _Optional[int] = ..., name: _Optional[str] = ..., trials_per_round: _Optional[int] = ..., statemachine_graph: _Optional[str] = ..., reward_ms: _Optional[int] = ..., p_next: _Optional[float] = ...) -> None: ...
+    mousewheel_zone_set: str
+    def __init__(self, total: _Optional[int] = ..., accepted: _Optional[int] = ..., remaining: _Optional[int] = ..., frame_loss: _Optional[int] = ..., by_outcome: _Optional[_Mapping[str, int]] = ..., hits: _Optional[int] = ..., hit_rate: _Optional[float] = ..., index: _Optional[int] = ..., trial_type_number: _Optional[int] = ..., name: _Optional[str] = ..., trials_per_round: _Optional[int] = ..., statemachine_graph: _Optional[str] = ..., reward_ms: _Optional[int] = ..., p_next: _Optional[float] = ..., mousewheel_zone_set: _Optional[str] = ...) -> None: ...
 
 class SetProgress(_message.Message):
     __slots__ = ("set_name", "accepted_trials", "hits", "all_trials", "criterion", "target", "switch_to", "reached", "fraction")

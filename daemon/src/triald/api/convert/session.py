@@ -80,6 +80,7 @@ def counter_rows_to_wire(
             name=trial_type.name,
             trials_per_round=trial_type.trials_per_round,
             statemachine_graph=trial_type.statemachine_graph,
+            mousewheel_zone_set=trial_type.mousewheel_zone_set,
             reward_ms=trial_type.reward_ms,
             p_next=state.p_next[index] if index < len(state.p_next) else 0.0,
         )

@@ -123,9 +123,8 @@ class StateMachineExecutor(TrialExecutor):
     ) -> None:
         """
         Args:
-            address: `host`, or `host:port`. The port is the executor's **gRPC**
-                one, which is one above the port its panels are served on; the
-                client's `DEFAULT_PORT` is the same rule written on this side.
+            address: `host`, or `host:port`. statemachined serves its panels
+                and gRPC on one port, 8081 unless told otherwise.
             client: an already-open client, for a caller that has one. The
                 default opens its own.
         """

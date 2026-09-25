@@ -72,7 +72,7 @@ class Outcome(_message.Message):
     def __init__(self, code: _Optional[int] = ..., name: _Optional[str] = ..., manipulandum: _Optional[str] = ..., reaction_time_ms: _Optional[float] = ..., terminating_interval: _Optional[int] = ..., precise_fixation: _Optional[bool] = ..., frame_loss: _Optional[_Union[FrameLoss, _Mapping]] = ..., reward_ms: _Optional[int] = ..., hit_condition: _Optional[bool] = ..., simulated: _Optional[bool] = ..., note: _Optional[str] = ...) -> None: ...
 
 class TrialSpec(_message.Message):
-    __slots__ = ("trial_number", "trial_type_index", "trial_type_number", "trial_type_name", "set_name", "statemachine_graph", "reward_ms", "recording", "paused", "started_at", "deadline")
+    __slots__ = ("trial_number", "trial_type_index", "trial_type_number", "trial_type_name", "set_name", "statemachine_graph", "reward_ms", "recording", "paused", "started_at", "deadline", "mousewheel_zone_set")
     TRIAL_NUMBER_FIELD_NUMBER: _ClassVar[int]
     TRIAL_TYPE_INDEX_FIELD_NUMBER: _ClassVar[int]
     TRIAL_TYPE_NUMBER_FIELD_NUMBER: _ClassVar[int]
@@ -84,6 +84,7 @@ class TrialSpec(_message.Message):
     PAUSED_FIELD_NUMBER: _ClassVar[int]
     STARTED_AT_FIELD_NUMBER: _ClassVar[int]
     DEADLINE_FIELD_NUMBER: _ClassVar[int]
+    MOUSEWHEEL_ZONE_SET_FIELD_NUMBER: _ClassVar[int]
     trial_number: int
     trial_type_index: int
     trial_type_number: int
@@ -95,7 +96,8 @@ class TrialSpec(_message.Message):
     paused: bool
     started_at: _timestamp_pb2.Timestamp
     deadline: _timestamp_pb2.Timestamp
-    def __init__(self, trial_number: _Optional[int] = ..., trial_type_index: _Optional[int] = ..., trial_type_number: _Optional[int] = ..., trial_type_name: _Optional[str] = ..., set_name: _Optional[str] = ..., statemachine_graph: _Optional[str] = ..., reward_ms: _Optional[int] = ..., recording: _Optional[bool] = ..., paused: _Optional[bool] = ..., started_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., deadline: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+    mousewheel_zone_set: str
+    def __init__(self, trial_number: _Optional[int] = ..., trial_type_index: _Optional[int] = ..., trial_type_number: _Optional[int] = ..., trial_type_name: _Optional[str] = ..., set_name: _Optional[str] = ..., statemachine_graph: _Optional[str] = ..., reward_ms: _Optional[int] = ..., recording: _Optional[bool] = ..., paused: _Optional[bool] = ..., started_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., deadline: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., mousewheel_zone_set: _Optional[str] = ...) -> None: ...
 
 class TrialRecord(_message.Message):
     __slots__ = ("trial", "outcome", "accepted", "refusal_reason", "ended_at", "policy_state")

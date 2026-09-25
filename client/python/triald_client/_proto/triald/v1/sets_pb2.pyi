@@ -21,18 +21,20 @@ class SwitchRule(_message.Message):
     def __init__(self, enabled: _Optional[bool] = ..., criterion: _Optional[_Union[_common_pb2.TrialCountCriterion, str]] = ..., count: _Optional[int] = ..., target: _Optional[str] = ...) -> None: ...
 
 class TrialType(_message.Message):
-    __slots__ = ("name", "trials_per_round", "statemachine_graph", "reward_ms", "params")
+    __slots__ = ("name", "trials_per_round", "statemachine_graph", "reward_ms", "params", "mousewheel_zone_set")
     NAME_FIELD_NUMBER: _ClassVar[int]
     TRIALS_PER_ROUND_FIELD_NUMBER: _ClassVar[int]
     STATEMACHINE_GRAPH_FIELD_NUMBER: _ClassVar[int]
     REWARD_MS_FIELD_NUMBER: _ClassVar[int]
     PARAMS_FIELD_NUMBER: _ClassVar[int]
+    MOUSEWHEEL_ZONE_SET_FIELD_NUMBER: _ClassVar[int]
     name: str
     trials_per_round: int
     statemachine_graph: str
     reward_ms: int
     params: _struct_pb2.Struct
-    def __init__(self, name: _Optional[str] = ..., trials_per_round: _Optional[int] = ..., statemachine_graph: _Optional[str] = ..., reward_ms: _Optional[int] = ..., params: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...
+    mousewheel_zone_set: str
+    def __init__(self, name: _Optional[str] = ..., trials_per_round: _Optional[int] = ..., statemachine_graph: _Optional[str] = ..., reward_ms: _Optional[int] = ..., params: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., mousewheel_zone_set: _Optional[str] = ...) -> None: ...
 
 class TrialTypeSet(_message.Message):
     __slots__ = ("name", "trial_types", "switch_rule", "trials_per_round", "runnable", "set_number", "active")

@@ -25,6 +25,8 @@ The logic is ported from VStim's `TrialTypeManager` (1,961 lines). See
 ## Build & test
 
 ```sh
+# From daemon/, where the Python project is — or `make sync test lint typecheck`
+# from the root, which passes --directory daemon.
 uv sync --group dev
 uv run pytest
 uv run ruff check . && uv run ruff format --check .
@@ -150,7 +152,7 @@ reaching for anything else.
   `Device.info`, `SessionEvent.data` and `TrialType.params` are stored and
   returned verbatim. triald has no business knowing what an electrode depth is.
 
-## Module layout (`src/triald/`)
+## Module layout (`daemon/src/triald/`)
 
 Roughly in dependency order — nothing later is imported by anything earlier.
 
@@ -167,14 +169,16 @@ Roughly in dependency order — nothing later is imported by anything earlier.
 | `session.py` | The trial loop — the state machine everything hangs off |
 | `metadata.py` | `SessionMetadata`, `Subject`, `Device`, `SessionEvent` — NWB-aligned names |
 | `recording.py` | The session directory: manifest, trials, events, summary |
+| `session_config_file.py` | The session config as a JSON file: strict reading that names the path to a bad value, and writing it back |
 | `runner.py` | Drives a session against a behaviour source |
 | `cli.py` | `triald sim`, `triald policy check`, `triald replay`, `triald serve` |
-| `api/wire.py`, `api/convert/` | protobuf's JSON mapping, and the seam between wire types and this daemon's own |
+| `api/convert/` | The seam between wire types and this daemon's own |
 | `api/service.py` | One rig's session — the rules about *when* something may be done |
 | `api/servicers/` | One module per service in `proto/triald/v1/service.proto` |
 | `api/grpc_server.py` | The daemon's own port: `grpc.aio`, for clients and CLIs |
 | `api/web_edge.py` | The browser's way in: gRPC-Web (binary), and the panels |
-| `client/web/` | The panels. A sibling of `daemon/`, with a build step whose output is committed |
+| `api/mdns_service_advertisement.py` | `_triald._tcp`, when bound to an address somebody else can reach |
+| `client/web/` (at the root) | The panels. A sibling of `daemon/`, with a build step whose output is committed |
 
 `api/` needs the `serve` extra; everything above it imports nothing at all,
 which is why it is a subpackage rather than mixed in. **The API is
@@ -188,7 +192,7 @@ on and neither is the authority for. The rpc addresses are **not** prefixed:
 `triald.v1.Trial/ReportOutcome` is a string a person types, and there is one
 triald on a rig.
 
-Not built yet: `client/{python,matlab,bonsai}`, the `Environment` and `Records`
+Not built yet: `client/{matlab,bonsai}`, the `Environment` and `Records`
 API groups, the CodeMirror policy editor and the configurable uPlot performance
 charts. All specified in `dev/PLAN.md`.
 
@@ -206,13 +210,15 @@ there are clients and CLIs, and a browser reaches the same rpcs over gRPC-Web.
 is the seam — wire types on one side, this daemon's own on the other — and
 nothing below `api/` knows protobuf exists. The clients and the web UI are
 generated from the proto and written against it, never against `triald.Session`.
-Still outstanding: the config-file shapes, and retiring `state.py`'s hand-written
+The session config file is JSON read by `session_config_file.py`, not protobuf:
+it is a document a person edits (`contracts/DAEMON_LAYOUT.md`). Still
+outstanding: retiring `state.py`'s hand-written
 `as_dict()` methods — a real refactor of working, tested code, and the drift test
 is what holds the two together until it happens.
 
 ## Testing
 
-Test the wiring, not just the class. `tests/test_adaptive.py` ends with a policy
+Test the wiring, not just the class. `daemon/tests/test_adaptive.py` ends with a policy
 driven through `Session` and `run_session` against the simulated subject — that
 test catches integration breaks the unit tests miss. `SimulatedBehaviourSource`
 and the `clock` argument to `Session` are the injection seams.

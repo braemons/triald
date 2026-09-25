@@ -1,13 +1,10 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The gRPC face of the daemon, and the browser edge beside it.
 
-Three things live here, in dependency order:
+What lives here, in dependency order:
 
-* :mod:`triald.api.wire` - protobuf's JSON mapping, with this API's settings
-  pinned. The types themselves are generated from ``proto/triald/v1/``, which
-  **is** the contract: types and behaviours both, hand-authored, and everything
-  a client reads is generated from it rather than describing it afterwards.
-* :mod:`triald.api.convert` - the seam. Wire types on one side, this daemon's
+* :mod:`triald.api.convert` - the seam. The types are generated from
+  ``proto/triald/v1/``, which **is** the contract. Wire types on one side, this daemon's
   own frozen dataclasses on the other, and every conversion between them in one
   place. Nothing below this layer names a protobuf type.
 * :mod:`triald.api.service` - one rig's session, the thing the routes mutate.
@@ -16,7 +13,7 @@ Three things live here, in dependency order:
 * :mod:`triald.api.servicers` - the eight services, one module each, and
   deliberately thin: convert, call the service, convert back.
 * :mod:`triald.api.grpc_server` - those servicers on a gRPC port.
-* :mod:`triald.api.web_edge` - the same servicers behind the Connect protocol,
+* :mod:`triald.api.web_edge` - the same servicers behind gRPC-Web (binary),
   and the panels, for a browser that cannot speak gRPC.
 
 Two things used to be here and are gone, for one reason between them.

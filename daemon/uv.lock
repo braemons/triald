@@ -277,6 +277,19 @@ wheels = [
 ]
 
 [[package]]
+name = "grpcio-reflection"
+version = "1.84.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "grpcio" },
+    { name = "protobuf" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/6e/8a/94af17ae0738cc4508af96d5f107f352e2b54473eecf32f0ed9bcdd895da/grpcio_reflection-1.84.0.tar.gz", hash = "sha256:06bf3d7d8cef9afbcc721ee52191652b4483831774255e174404b0e0551741bc", size = 19321, upload-time = "2026-09-14T07:10:28.58Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/47/8b/f07f5aa8ee2b2bd060c0100a581ab68a9b501a927fcf97b1855e40b7bd7c/grpcio_reflection-1.84.0-py3-none-any.whl", hash = "sha256:148b382a1a5621496ede90b12b97c868bb94f7bb8e23b18fc03ed32edd5447cb", size = 22986, upload-time = "2026-09-14T07:10:14.038Z" },
+]
+
+[[package]]
 name = "grpcio-tools"
 version = "1.84.0"
 source = { registry = "https://pypi.org/simple" }
@@ -408,6 +421,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/00/15/a4983fd782472b7968b4a0b50092981debccdd938ba4d94698bbb71b0abb/json_tricks-3.17.3.tar.gz", hash = "sha256:71561eedad7c22dde019e9a38ff8c46ebd91da789e31e2513f627dd2cbbdbf56", size = 30537, upload-time = "2023-08-19T12:08:29.487Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ae/fd/e3edcf827e7f9c17c5ea1a192841dcfb1dd575a7518c25c5cadd921625b1/json_tricks-3.17.3-py2.py3-none-any.whl", hash = "sha256:8ba11cb66a09532945c05c7374a72b857dfc3870b2d145125edd508f4027dff9", size = 27613, upload-time = "2023-08-19T12:08:27.533Z" },
+]
+
+[[package]]
+name = "mousewheeld-client"
+version = "0.0.0"
+source = { git = "https://github.com/braemons/mousewheeld.git?subdirectory=client%2Fpython&branch=main#61c80153dc3f22efada2f1df1ea340725b58bb33" }
+dependencies = [
+    { name = "grpcio" },
+    { name = "protobuf" },
 ]
 
 [[package]]
@@ -874,9 +896,12 @@ adaptive = [
 ]
 serve = [
     { name = "grpcio" },
+    { name = "grpcio-reflection" },
+    { name = "mousewheeld-client" },
     { name = "protobuf" },
     { name = "statemachined-client" },
     { name = "uvicorn", extra = ["standard"] },
+    { name = "zeroconf" },
 ]
 
 [package.dev-dependencies]
@@ -894,10 +919,13 @@ stimulus = [
 [package.metadata]
 requires-dist = [
     { name = "grpcio", marker = "extra == 'serve'", specifier = ">=1.66" },
+    { name = "grpcio-reflection", marker = "extra == 'serve'", specifier = ">=1.66" },
+    { name = "mousewheeld-client", marker = "extra == 'serve'", git = "https://github.com/braemons/mousewheeld.git?subdirectory=client%2Fpython&branch=main" },
     { name = "protobuf", marker = "extra == 'serve'", specifier = ">=5.27" },
     { name = "questplus", marker = "extra == 'adaptive'", specifier = ">=2023.1" },
     { name = "statemachined-client", marker = "extra == 'serve'", git = "https://github.com/braemons/statemachined.git?subdirectory=client%2Fpython&branch=main" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'serve'", specifier = ">=0.32" },
+    { name = "zeroconf", marker = "extra == 'serve'", specifier = ">=0.136" },
 ]
 provides-extras = ["serve", "adaptive"]
 

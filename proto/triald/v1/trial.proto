@@ -94,6 +94,9 @@ message TrialSpec {
   // gets a datetime from its generator rather than something to parse.
   google.protobuf.Timestamp started_at = 10 [json_name = "started_at"];
   optional google.protobuf.Timestamp deadline = 11;
+
+  // The zone set mousewheeld arms for this trial; empty means none.
+  string mousewheel_zone_set = 12 [json_name = "mousewheel_zone_set"];
 }
 
 // One finished trial.

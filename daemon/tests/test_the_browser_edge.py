@@ -20,7 +20,6 @@ import asyncio
 import base64
 import contextlib
 import datetime as dt
-import json
 import struct
 import time
 import urllib.parse
@@ -31,7 +30,7 @@ from google.protobuf import json_format
 from google.protobuf.message_factory import GetMessageClass
 
 from triald._proto.triald.v1 import service_pb2
-from triald.api import SessionService, convert, wire
+from triald.api import SessionService, convert
 from triald.api.grpc_server import build_servicers
 from triald.api.servicers.refusals import REFUSAL_METADATA_KEY
 from triald.api.web_edge import build_edge
@@ -897,7 +896,9 @@ def test_the_wire_carries_the_whole_trial(service: SessionService):
     service.step(5)
     record = service.session.state().history[-1]
 
-    from_wire = json.loads(wire.to_json(convert.trial_record_to_wire(record)))
+    from_wire = json_format.MessageToDict(
+        convert.trial_record_to_wire(record), always_print_fields_with_no_presence=True
+    )
     from_record = record.as_dict()
 
     assert from_wire["accepted"] == from_record["accepted"]

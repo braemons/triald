@@ -22,7 +22,7 @@ to mislabel data it never understood.
 
 **Optional, and that is load-bearing.** A rig with no display daemon runs triald
 unchanged: nothing constructs this unless something asks for it, and the session
-loop never learns whether it exists. `vstimd` is an optional dependency for the
+loop never learns whether it exists. `vstimd-client` is an optional dependency for the
 same reason.
 
 **Subscribed to exactly two topics.** Frame drops, because those can veto a
@@ -70,7 +70,7 @@ def connect(host: str, port: int | None = None) -> StimulusSource:
     Imported here rather than at module scope: a triald with no display daemon
     in its rig should not need the client installed to start.
     """
-    from vstimd.events import (  # ty: ignore[unresolved-import]  (the optional `stimulus` group)
+    from vstimd_client.events import (  # ty: ignore[unresolved-import]  (the optional `stimulus` group)
         DEFAULT_EVENT_PORT,
         EventSubscriber,
     )

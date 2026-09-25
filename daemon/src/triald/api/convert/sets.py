@@ -43,6 +43,7 @@ def trial_type_to_wire(trial_type: TrialType) -> sets_pb2.TrialType:
         name=trial_type.name,
         trials_per_round=trial_type.trials_per_round,
         statemachine_graph=trial_type.statemachine_graph,
+        mousewheel_zone_set=trial_type.mousewheel_zone_set,
         reward_ms=trial_type.reward_ms,
     )
     # Paradigm values, stored and returned verbatim. `Struct` is what "this
@@ -58,6 +59,7 @@ def trial_type_from_wire(message: sets_pb2.TrialType) -> TrialType:
         name=message.name,
         trials_per_round=message.trials_per_round,
         statemachine_graph=message.statemachine_graph,
+        mousewheel_zone_set=message.mousewheel_zone_set,
         reward_ms=message.reward_ms,
         params=dict(message.params),
     )
