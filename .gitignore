@@ -35,3 +35,7 @@ htmlcov/
 /client/python/.venv/
 /client/python/dist/
 /client/python/build/
+
+# `make dev`: what a daemon run from this checkout records and stores.
+/dev/sessions/
+/dev/policies/

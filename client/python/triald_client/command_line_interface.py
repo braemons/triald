@@ -21,14 +21,17 @@ import argparse
 import json
 import os
 import sys
+import types
+import typing
 from collections.abc import Sequence
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict, fields, is_dataclass
 from datetime import datetime
 from enum import Enum, IntEnum
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from . import DEFAULT_PORT, TrialdClient
+from .api_types import ConfigPatch, OutcomeReport, SimSettings, TrialOutcome, TrialTypeSet
 from .daemon_refusals import DaemonRefusedTheRequest
 
 RIG_ENVIRONMENT_VARIABLE = "BRAEMONS_RIG"
@@ -72,6 +75,61 @@ def _plain(value):
     if isinstance(value, dict):
         return {key: _plain(item) for key, item in value.items()}
     return value
+
+
+def _build(kind, value):
+    """JSON into one of the client's types: the inverse of `_plain`.
+
+    An `IntEnum` takes its name as well as its number, so `hit` and `1` are the
+    same outcome; anything else is the value `_plain` prints. A field the type
+    does not have is refused rather than dropped, because a misspelt setting
+    that silently does nothing is the worst way for a patch to fail.
+    """
+    origin = typing.get_origin(kind)
+    if origin in (typing.Union, types.UnionType):
+        if value is None:
+            return None
+        (inner,) = [one for one in typing.get_args(kind) if one is not type(None)]
+        return _build(inner, value)
+    if origin is tuple:
+        return tuple(_build(typing.get_args(kind)[0], one) for one in value)
+    if isinstance(kind, type) and is_dataclass(kind):
+        if not isinstance(value, dict):
+            raise ValueError(f"{kind.__name__} is a JSON object, not {value!r}")
+        unknown = sorted(set(value) - {one.name for one in fields(kind)})
+        if unknown:
+            raise ValueError(f"{kind.__name__} has no field {', '.join(unknown)}")
+        hints = typing.get_type_hints(kind)
+        return kind(**{name: _build(hints[name], one) for name, one in value.items()})
+    if isinstance(kind, type) and issubclass(kind, IntEnum) and isinstance(value, str):
+        try:
+            return kind[value.upper()]
+        except KeyError:
+            names = ", ".join(one.name.lower() for one in kind)
+            raise ValueError(f"{value!r} is not a {kind.__name__}: one of {names}") from None
+    if isinstance(kind, type) and issubclass(kind, Enum):
+        return kind(value)
+    return value
+
+
+def _fields(pairs: Sequence[str]) -> dict:
+    """`NAME=VALUE` arguments as a JSON object. The value is JSON when it parses
+    as JSON and text when it does not, so `note=late again` needs no quotes and
+    `rounds=3` is a number."""
+    parsed = {}
+    for pair in pairs:
+        name, separator, text = pair.partition("=")
+        if not separator:
+            raise ValueError(f"expected NAME=VALUE, not {pair!r}")
+        try:
+            parsed[name] = json.loads(text)
+        except json.JSONDecodeError:
+            parsed[name] = text
+    return parsed
+
+
+def _read(path: str) -> str:
+    return sys.stdin.read() if path == "-" else Path(path).read_text(encoding="utf-8")
 
 
 def _print(value) -> None:
@@ -121,7 +179,12 @@ def build_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
 
     commands.add_parser("state", help="everything true right now")
-    commands.add_parser("session-config", help="the declarative settings")
+    session_config = commands.add_parser("session-config", help="the declarative settings")
+    session_config_actions = session_config.add_subparsers(dest="action")
+    session_config_set = session_config_actions.add_parser(
+        "set", help="change some of them, e.g. rounds=3 ordering=ascending"
+    )
+    session_config_set.add_argument("fields", nargs="+", metavar="NAME=VALUE")
 
     sets = commands.add_parser("sets", help="the sets, their rules and the chain")
     set_actions = sets.add_subparsers(dest="action", required=True)
@@ -132,7 +195,12 @@ def build_parser() -> argparse.ArgumentParser:
     set_remove.add_argument("name")
     set_load = set_actions.add_parser("load", help="make a set active")
     set_load.add_argument("name")
+    set_put = set_actions.add_parser("put", help="add or replace a set from a JSON file")
+    set_put.add_argument("file", help="the set as `sets get` prints it, or - for stdin")
+    set_put.add_argument("--name", help="store a copy under this name; default: its own")
     commands.add_parser("counters", help="the per-trial-type tally of the active set")
+    reset = commands.add_parser("reset", help="start the rounds again, or clear the counters")
+    reset.add_argument("what", choices=["rounds", "counters"])
 
     watch = commands.add_parser("watch", help="follow the state stream until interrupted")
     watch.add_argument(
@@ -142,6 +210,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     commands.add_parser("arm", help="build a session and start it")
+
+    trial = commands.add_parser("trial", help="run one trial by hand: next, report, cancel")
+    trial_actions = trial.add_subparsers(dest="action", required=True)
+    trial_actions.add_parser("next", help="select the next trial and print its spec")
+    trial_report = trial_actions.add_parser("report", help="report how a trial ended")
+    trial_report.add_argument("trial_number", type=int, help="from the spec `trial next` gave")
+    trial_report.add_argument("outcome", help="a name (hit, early, ...) or its .tdr code")
+    trial_report.add_argument(
+        "fields", nargs="*", metavar="NAME=VALUE", help="the rest, e.g. reaction_time_ms=412"
+    )
+    trial_cancel = trial_actions.add_parser("cancel", help="abandon the trial in flight")
+    trial_cancel.add_argument("reason", nargs="?", default="cancelled from trialctl")
+
     stop = commands.add_parser("stop", help="end the session")
     stop.add_argument("reason", nargs="?", default="stopped from trialctl")
 
@@ -162,6 +243,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     step = commands.add_parser("step", help="run trials against the simulated subject")
     step.add_argument("trials", nargs="?", type=int, default=1)
+
+    sim = commands.add_parser("sim", help="the simulated subject's dials, and free-running it")
+    sim_actions = sim.add_subparsers(dest="action", required=True)
+    sim_actions.add_parser("show", help="the dials")
+    sim_set = sim_actions.add_parser("set", help="move some dials, e.g. hit_rate=0.9")
+    sim_set.add_argument("fields", nargs="+", metavar="NAME=VALUE")
+    free_run = sim_actions.add_parser("free-run", help="step the subject on a timer")
+    free_run.add_argument("switch", choices=["status", "start", "stop"])
+    free_run.add_argument("--interval-ms", type=int, default=250)
 
     return parser
 
@@ -189,6 +279,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _fail("unavailable", str(problem), ExitStatus.UNAVAILABLE)
     except OSError as problem:
         return _fail("unreadable", str(problem), ExitStatus.FAILURE)
+    except (ValueError, TypeError) as problem:
+        return _fail("usage", str(problem), ExitStatus.USAGE)
     except (KeyboardInterrupt, BrokenPipeError):
         return ExitStatus.INTERRUPTED
 
@@ -197,12 +289,18 @@ def _run(rig: TrialdClient, arguments) -> int:
     match arguments.command:
         case "state":
             _print(rig.read_state())
+        case "session-config" if arguments.action == "set":
+            _print(rig.update_config(_build(ConfigPatch, _fields(arguments.fields))))
         case "session-config":
             _print(rig.read_config())
         case "sets":
             return _sets(rig, arguments)
         case "counters":
             _print(rig.read_state().counters)
+        case "reset":
+            _print(rig.reset_rounds() if arguments.what == "rounds" else rig.reset_counters())
+        case "trial":
+            return _trial(rig, arguments)
         case "watch":
             _watch(rig, summary=arguments.summary)
         case "arm":
@@ -224,6 +322,8 @@ def _run(rig: TrialdClient, arguments) -> int:
             return _policy(rig, arguments)
         case "step":
             _print(rig.step(arguments.trials))
+        case "sim":
+            _sim(rig, arguments)
     return ExitStatus.OK
 
 
@@ -242,7 +342,51 @@ def _sets(rig: TrialdClient, arguments) -> int:
             _print(rig.delete_set(arguments.name))
         case "load":
             _print(rig.load_set(arguments.name))
+        case "put":
+            plain = json.loads(_read(arguments.file))
+            if arguments.name:
+                # A copy under a new name, not a mismatch: the daemon refuses a
+                # set stored under a name it does not carry.
+                plain["name"] = arguments.name
+            _print(rig.write_set(_build(TrialTypeSet, plain)))
     return ExitStatus.OK
+
+
+def _trial(rig: TrialdClient, arguments) -> int:
+    match arguments.action:
+        case "next":
+            _print(rig.next_trial())
+        case "report":
+            report = _build(
+                OutcomeReport,
+                {**_fields(arguments.fields), "outcome": _outcome(arguments.outcome)},
+            )
+            _print(rig.report_outcome(arguments.trial_number, report))
+        case "cancel":
+            _print(rig.cancel_trial(arguments.reason))
+    return ExitStatus.OK
+
+
+def _outcome(text: str) -> TrialOutcome:
+    """`hit`, `HIT` or `1`: the name a person types or the code a `.tdr` holds."""
+    return _build(TrialOutcome, int(text) if text.lstrip("-").isdigit() else text)
+
+
+def _sim(rig: TrialdClient, arguments) -> None:
+    match arguments.action:
+        case "show":
+            _print(rig.read_sim())
+        case "set":
+            # Over what is there now, so that naming one dial leaves the others
+            # where somebody put them rather than back at their defaults.
+            current = _plain(rig.read_sim())
+            _print(rig.write_sim(_build(SimSettings, {**current, **_fields(arguments.fields)})))
+        case "free-run":
+            if arguments.switch == "status":
+                _print(rig.read_free_run())
+            else:
+                running = arguments.switch == "start"
+                _print(rig.write_free_run(running, arguments.interval_ms))
 
 
 def _policy(rig: TrialdClient, arguments) -> int:
