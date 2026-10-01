@@ -8,7 +8,8 @@
 # it is not.
 
 .PHONY: help sync test lint fmt typecheck check sim clean version \
-        proto check-proto web check-web client deb wheel packages package-check
+        proto check-proto web check-web client deb wheel packages package-check \
+        build dev docs package
 
 help:
 	@echo "make sync       install the dev environment"
@@ -16,7 +17,10 @@ help:
 	@echo "make lint       ruff check + format --check"
 	@echo "make fmt        ruff format"
 	@echo "make typecheck  ty check"
-	@echo "make check      lint + typecheck + test + the proto + a simulated session"
+	@echo "make build      the wheel and the sdist (make wheel)"
+	@echo "make dev        serve on 8420/8421, recording under dev/"
+	@echo "make check      lint + typecheck + test + the proto + the docs + a simulated session"
+	@echo "make docs       docs/reference/api.md names every rpc in proto/"
 	@echo "make proto      regenerate daemon/src/triald/_proto/ from proto/"
 	@echo "make check-proto  the proto compiles, is current, and matches the taxonomy"
 	@echo "make web        regenerate client/web/elements/daemon_api_client.js from proto/"
@@ -26,7 +30,7 @@ help:
 	@echo "make version    the version the git tag implies"
 	@echo ""
 	@echo "Packaging (packaging/Makefile has the rest, and the reasons):"
-	@echo "make deb        the .deb for this machine"
+	@echo "make deb        the .deb for this machine (make package)"
 	@echo "make wheel      the wheel and the sdist"
 	@echo "make packages   every artifact a release publishes, in the pinned image"
 	@echo "make package-check  stage the tree and run it, packaging nothing"
@@ -151,12 +155,32 @@ client: ## the Python client's checks: its stubs, ruff, ty, and both suites
 #
 # Not check-web and not client: both need a network the first time, and this
 # target has to work on a rig. CI runs each as its own step.
-check: lint typecheck test check-proto
+check: lint typecheck test check-proto docs
 	uv run --directory daemon triald sim --trials 200
 	uv run --directory daemon triald policy check ../examples/staircase.py --trial-types contrast_0,contrast_1,contrast_2,contrast_3,contrast_4,contrast_5
 
 sim:
 	uv run --directory daemon triald sim --trials 200 --trace
+
+# The panels on --port, gRPC on --port + 1, and nothing advertised: a laptop
+# should not appear in a console's rig list.
+dev:
+	uv run --directory daemon --extra serve triald serve --no-mdns \
+	  --results-dir ../dev/sessions --policy-dir ../dev/policies
+
+docs:
+	@missing=$$(grep -hoE '^[[:space:]]*rpc [A-Za-z]+' proto/triald/v1/*.proto | awk '{print $$2}' \
+	  | while read rpc; do grep -qw "$$rpc" docs/reference/api.md || echo "$$rpc"; done); \
+	if [ -n "$$missing" ]; then \
+	  echo "docs/reference/api.md does not mention:" $$missing; \
+	  echo "the document a person reads is behind the interface; say what each one does."; \
+	  exit 1; \
+	fi
+
+# The family's names (contracts/DAEMON_LAYOUT.md §4) for the packaging targets.
+build: wheel
+
+package: deb
 
 version:
 	@sh packaging/scripts/git-version.sh
